@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { BRANCHES, PAYMENT_LABEL } from "@/lib/constants";
 import { fDateTime, mxn } from "@/lib/format";
-import { errorMessage, useErp } from "@/lib/store";
+import { errorMessage, useErp, useIsOwner } from "@/lib/store";
 import type { BranchId, Category, Customer, LineItem, Order, PaymentMethod, Product } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { productStock, stockOf, variantKey } from "@/lib/variants";
@@ -33,7 +33,11 @@ export default function PosPage() {
   const createOrder = useErp((s) => s.createOrder);
   const [charging, setCharging] = useState(false);
 
-  const [branch, setBranch] = useState<BranchId>("andara");
+  const profile = useErp((s) => s.profile);
+  const owner = useIsOwner();
+  const [selectedBranch, setBranch] = useState<BranchId>("andara");
+  // Los vendedores solo cobran en su sucursal asignada; el dueño puede elegir.
+  const branch = !owner && profile ? profile.branch : selectedBranch;
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<Category | "all">("all");
   const [picking, setPicking] = useState<Product | null>(null);
@@ -124,24 +128,28 @@ export default function PosPage() {
         description="Cobra en mostrador; cada venta descuenta el inventario de la sucursal al instante."
         actions={
           <>
-            <Select
-              value={branch}
-              onValueChange={(v) => {
-                setBranch(v as BranchId);
-                setCart([]);
-              }}
-            >
-              <SelectTrigger className="h-9 w-52 bg-card">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STORE_BRANCHES.map((b) => (
-                  <SelectItem key={b.id} value={b.id}>
-                    {b.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {owner ? (
+              <Select
+                value={branch}
+                onValueChange={(v) => {
+                  setBranch(v as BranchId);
+                  setCart([]);
+                }}
+              >
+                <SelectTrigger className="h-9 w-52 bg-card">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STORE_BRANCHES.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="flex h-9 items-center rounded-md border bg-card px-3 text-sm">{branchLabel}</div>
+            )}
             <Button variant="outline" className="h-9" onClick={() => setShowCut(true)}>
               <Receipt /> Corte de caja
             </Button>
