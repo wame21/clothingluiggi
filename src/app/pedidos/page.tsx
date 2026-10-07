@@ -78,7 +78,7 @@ export default function PedidosPage() {
       <Card className="mt-4 gap-0 py-0">
         <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-center lg:justify-between">
           <Tabs value={tab} onValueChange={(v) => { setTab(v); setLimit(40); }}>
-            <TabsList className="h-auto flex-wrap">
+            <TabsList className="flex-wrap group-data-horizontal/tabs:h-auto">
               {TABS.map((t) => (
                 <TabsTrigger key={t.id} value={t.id}>
                   {t.label}
