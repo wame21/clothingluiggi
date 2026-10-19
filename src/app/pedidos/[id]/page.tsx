@@ -32,13 +32,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { branchName, CARRIERS, CUSTOMER_TYPE_LABEL, PAYMENT_LABEL, STATUS_LABEL } from "@/lib/constants";
+import { CUSTOMER_TYPE_LABEL, PAYMENT_LABEL, STATUS_LABEL } from "@/lib/constants";
 import { fDateTime, mxn, pct } from "@/lib/format";
 import { orderBalance, orderCost, orderFees, orderPaid } from "@/lib/metrics";
-import { errorMessage, useErp, useIsOwner } from "@/lib/store";
+import { errorMessage, useBranchName, useBusinessName, useErp, useIsOwner } from "@/lib/store";
 import type { Order, OrderStatus, PaymentMethod } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { tierById } from "@/lib/wholesale";
+import { TIERS } from "@/lib/wholesale";
 
 const STEPS: { status: OrderStatus; label: string }[] = [
   { status: "pendiente", label: "Pedido" },
@@ -53,6 +53,8 @@ export default function PedidoDetalle() {
   const order = useErp((s) => s.orders.find((o) => o.id === id));
   const customer = useErp((s) => s.customers.find((c) => c.id === order?.customerId));
   const owner = useIsOwner();
+  const businessName = useBusinessName();
+  const branchName = useBranchName();
   const [showDoc, setShowDoc] = useState(false);
 
   if (!order) {
@@ -67,11 +69,12 @@ export default function PedidoDetalle() {
   const profit = net - cost - fees;
   const pickup = order.notes?.includes("Recoge") ?? false;
   const rank = RANK[order.status];
-  const tier = order.tierId && order.tierId !== "menudeo" ? tierById(order.tierId) : undefined;
+  // Si el nivel ya no existe en la configuración, el pedido se muestra sin nivel.
+  const tier = order.tierId ? TIERS.find((t) => t.id === order.tierId) : undefined;
   const waPhone = customer ? `52${customer.phone.replace(/\D/g, "")}` : "";
   const waText = encodeURIComponent(
-    `Hola ${customer?.name.split(" ")[0] ?? ""}, te saluda Luiggi Boutique. Tu pedido ${order.folio} está: ${STATUS_LABEL[order.status]}.` +
-      (order.shippingInfo?.tracking ? ` Guía ${order.shippingInfo.carrier}: ${order.shippingInfo.tracking}.` : "") +
+    `Hola ${customer?.name.split(" ")[0] ?? ""}, te saluda ${businessName}. Tu pedido ${order.folio} está: ${STATUS_LABEL[order.status]}.` +
+      (order.shippingInfo?.tracking ? ` Guía${order.shippingInfo.carrier ? ` ${order.shippingInfo.carrier}` : ""}: ${order.shippingInfo.tracking}.` : "") +
       (balance > 0 ? ` Saldo pendiente: ${mxn(balance)}.` : ""),
   );
 
@@ -383,8 +386,11 @@ function PaymentDialog({ order, balance }: { order: Order; balance: number }) {
 
 function ShipDialog({ order }: { order: Order }) {
   const setOrderStatus = useErp((s) => s.setOrderStatus);
+  const configured = useErp((s) => s.sales.carriers);
   const [open, setOpen] = useState(false);
-  const [carrier, setCarrier] = useState(order.shippingInfo?.carrier ?? CARRIERS[0]);
+  const [carrier, setCarrier] = useState(order.shippingInfo?.carrier ?? configured[0] ?? "");
+  // La paquetería del pedido puede haberse quitado de la configuración.
+  const carriers = carrier && !configured.includes(carrier) ? [carrier, ...configured] : configured;
   const [tracking, setTracking] = useState("");
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -401,18 +407,22 @@ function ShipDialog({ order }: { order: Order }) {
         <div className="grid gap-3">
           <div className="grid gap-1.5">
             <Label>Paquetería</Label>
-            <Select value={carrier} onValueChange={setCarrier}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CARRIERS.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {carriers.length > 0 ? (
+              <Select value={carrier} onValueChange={setCarrier}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {carriers.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input value={carrier} onChange={(e) => setCarrier(e.target.value)} placeholder="Nombre de la paquetería" />
+            )}
           </div>
           <div className="grid gap-1.5">
             <Label>Número de guía</Label>
@@ -422,9 +432,9 @@ function ShipDialog({ order }: { order: Order }) {
         <DialogFooter>
           <Button
             onClick={() => {
-              setOrderStatus(order.id, "enviado", { carrier, tracking: tracking.trim() || undefined })
+              setOrderStatus(order.id, "enviado", { carrier: carrier.trim() || undefined, tracking: tracking.trim() || undefined })
                 .then(() => {
-                  toast.success(`${order.folio} enviado por ${carrier}`);
+                  toast.success(carrier.trim() ? `${order.folio} enviado por ${carrier.trim()}` : `${order.folio} marcado como enviado`);
                   setOpen(false);
                 })
                 .catch((e) => toast.error(errorMessage(e)));
@@ -440,6 +450,7 @@ function ShipDialog({ order }: { order: Order }) {
 
 function CancelDialog({ order }: { order: Order }) {
   const setOrderStatus = useErp((s) => s.setOrderStatus);
+  const branchName = useBranchName();
   const [open, setOpen] = useState(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>

@@ -1,19 +1,22 @@
 "use client";
 
-import { UserCog } from "lucide-react";
+import { Check, Copy, RefreshCw, UserCog } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState, PageHeader } from "@/components/erp";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { BRANCHES } from "@/lib/constants";
 import { fDate } from "@/lib/format";
-import { errorMessage, useErp } from "@/lib/store";
+import { errorMessage, useActiveBranches, useBranches, useErp } from "@/lib/store";
 import type { AppRole, BranchId, Profile } from "@/lib/types";
 
 const ROLE_LABEL: Record<AppRole, string> = { dueno: "Dueño", vendedor: "Vendedor", pendiente: "Pendiente" };
+
+/** Valor del selector para "sin sucursal" (Radix no admite valores vacíos). */
+const NO_BRANCH = "none";
 
 export default function EquipoPage() {
   const team = useErp((s) => s.team);
@@ -30,8 +33,9 @@ export default function EquipoPage() {
     <>
       <PageHeader
         title="Equipo"
-        description="Quien se registra en la app queda pendiente. Apruébalo como vendedor y asígnale su sucursal; los vendedores no ven costos, utilidades ni gastos."
+        description="Quien se registra con el código de tu negocio queda pendiente. Apruébalo como vendedor y asígnale su sucursal; los vendedores no ven costos, utilidades ni gastos."
       />
+      <InviteCard />
       {pendientes > 0 && (
         <p className="mb-4 text-sm text-gold">
           {pendientes} {pendientes === 1 ? "persona espera" : "personas esperan"} tu aprobación.
@@ -62,12 +66,87 @@ export default function EquipoPage() {
   );
 }
 
+function InviteCard() {
+  const code = useErp((s) => s.business?.inviteCode);
+  const regenerate = useErp((s) => s.regenerateInviteCode);
+  const [copied, setCopied] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  if (!code) return null;
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      toast.error("No se pudo copiar; selecciona el código y cópialo a mano");
+    }
+  };
+
+  const renew = async () => {
+    setBusy(true);
+    try {
+      await regenerate();
+      toast.success("Código nuevo generado; el anterior ya no sirve");
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <Card className="mb-6 gap-3 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-xs uppercase tracking-wider text-muted-foreground">Código de invitación</div>
+          <div className="select-all font-mono text-2xl font-semibold tracking-[0.25em] gold-text">{code}</div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => void copy()}>
+            {copied ? <Check /> : <Copy />}
+            {copied ? "Copiado" : "Copiar"}
+          </Button>
+          {confirming ? (
+            <>
+              <Button variant="destructive" size="sm" disabled={busy} onClick={() => void renew()}>
+                <RefreshCw className={busy ? "animate-spin" : undefined} />
+                Sí, generar nuevo
+              </Button>
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirming(false)}>
+                Cancelar
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => setConfirming(true)}>
+              <RefreshCw />
+              Generar nuevo código
+            </Button>
+          )}
+        </div>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Para invitar a alguien, compártele este código. Debe elegir «Registrarme → Unirme a un negocio» al crear su cuenta y
+        escribirlo. Quedará pendiente hasta que lo apruebes aquí. Si generas un código nuevo, el anterior deja de funcionar.
+      </p>
+    </Card>
+  );
+}
+
 function MemberRow({ member, self }: { member: Profile; self: boolean }) {
   const setMember = useErp((s) => s.setMember);
+  const active = useActiveBranches();
+  const all = useBranches();
   const [saving, setSaving] = useState(false);
   const locked = self || member.role === "dueno";
 
-  const save = async (role: AppRole, branch: BranchId) => {
+  // Si la sucursal asignada se archivó sigue apareciendo hasta que se cambie.
+  const archived = member.branch && !active.some((b) => b.id === member.branch) ? all.find((b) => b.id === member.branch) : undefined;
+
+  const save = async (role: AppRole, branch: BranchId | null) => {
     setSaving(true);
     try {
       await setMember(member.id, role, branch);
@@ -111,16 +190,26 @@ function MemberRow({ member, self }: { member: Profile; self: boolean }) {
         {locked ? (
           <span className="text-muted-foreground">Todas</span>
         ) : (
-          <Select value={member.branch} disabled={saving} onValueChange={(v) => void save(member.role, v as BranchId)}>
+          <Select
+            value={member.branch ?? NO_BRANCH}
+            disabled={saving}
+            onValueChange={(v) => void save(member.role, v === NO_BRANCH ? null : v)}
+          >
             <SelectTrigger className="w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {BRANCHES.map((b) => (
+              <SelectItem value={NO_BRANCH}>Sin sucursal</SelectItem>
+              {active.map((b) => (
                 <SelectItem key={b.id} value={b.id}>
                   {b.short}
                 </SelectItem>
               ))}
+              {archived && (
+                <SelectItem value={archived.id} disabled>
+                  {archived.short} (archivada)
+                </SelectItem>
+              )}
             </SelectContent>
           </Select>
         )}

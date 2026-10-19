@@ -3,7 +3,6 @@
 import { Banknote, CreditCard, Landmark, Minus, Plus, Printer, Receipt, Search, ShoppingCart, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { BrandMark } from "@/components/brand";
 import { CustomerSelect } from "@/components/customer-picker";
 import { ColorSwatch, PageHeader } from "@/components/erp";
 import { Button } from "@/components/ui/button";
@@ -12,14 +11,13 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { BRANCHES, PAYMENT_LABEL } from "@/lib/constants";
+import { PAYMENT_LABEL } from "@/lib/constants";
 import { fDateTime, mxn } from "@/lib/format";
-import { errorMessage, useErp, useIsOwner } from "@/lib/store";
+import { errorMessage, useBranches, useBusinessName, useErp, useIsOwner, usePosBranches } from "@/lib/store";
 import type { BranchId, Category, Customer, LineItem, Order, PaymentMethod, Product } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { productStock, stockOf, variantKey } from "@/lib/variants";
 
-const STORE_BRANCHES = BRANCHES.filter((b) => b.id !== "bodega");
 const METHODS: { id: PaymentMethod; label: string; icon: typeof Banknote }[] = [
   { id: "efectivo", label: "Efectivo", icon: Banknote },
   { id: "tarjeta", label: "Tarjeta", icon: CreditCard },
@@ -34,10 +32,16 @@ export default function PosPage() {
   const [charging, setCharging] = useState(false);
 
   const profile = useErp((s) => s.profile);
+  const settings = useErp((s) => s.profileSettings);
+  const businessName = useBusinessName();
+  const allBranches = useBranches();
+  const posBranches = usePosBranches();
   const owner = useIsOwner();
-  const [selectedBranch, setBranch] = useState<BranchId>("andara");
-  // Los vendedores solo cobran en su sucursal asignada; el dueño puede elegir.
-  const branch = !owner && profile ? profile.branch : selectedBranch;
+  const [selectedBranch, setBranch] = useState<BranchId | undefined>();
+  // Los vendedores solo cobran en su sucursal asignada; el dueño puede elegir (por defecto la primera).
+  const seller = posBranches.find((b) => b.id === profile?.branch);
+  const current = owner ? (posBranches.find((b) => b.id === selectedBranch) ?? posBranches[0]) : seller;
+  const branch = current?.id ?? "";
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<Category | "all">("all");
   const [picking, setPicking] = useState<Product | null>(null);
@@ -119,7 +123,24 @@ export default function PosPage() {
     };
   }, [orders, branch]);
 
-  const branchLabel = BRANCHES.find((b) => b.id === branch)?.name;
+  const branchLabel = current?.name;
+
+  if (!current) {
+    return (
+      <>
+        <PageHeader title="Punto de venta" description="Cobra en mostrador; cada venta descuenta el inventario de la sucursal al instante." />
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            {owner
+              ? "Ninguna sucursal tiene punto de venta. Actívalo en Configuración, en Sucursales."
+              : !profile?.branch
+                ? "Pide al dueño que te asigne una sucursal."
+                : "Tu sucursal no tiene punto de venta. Pide al dueño que lo revise."}
+          </CardContent>
+        </Card>
+      </>
+    );
+  }
 
   return (
     <>
@@ -140,7 +161,7 @@ export default function PosPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {STORE_BRANCHES.map((b) => (
+                  {posBranches.map((b) => (
                     <SelectItem key={b.id} value={b.id}>
                       {b.name}
                     </SelectItem>
@@ -302,7 +323,7 @@ export default function PosPage() {
               <DialogHeader>
                 <DialogTitle>{picking.name}</DialogTitle>
                 <DialogDescription>
-                  {mxn(picking.price)} · Toca la talla para agregar (stock en {BRANCHES.find((b) => b.id === branch)?.short})
+                  {mxn(picking.price)} · Toca la talla para agregar (stock en {current.short})
                 </DialogDescription>
               </DialogHeader>
               <div className="flex flex-col gap-3">
@@ -344,9 +365,12 @@ export default function PosPage() {
           {ticket && (
             <div className="print-area rounded-lg bg-white p-4 font-mono text-[11px] text-neutral-900">
               <div className="flex flex-col items-center gap-1 text-center">
-                <BrandMark className="size-10 text-sm" />
-                <div className="font-display text-base font-semibold tracking-[0.2em]">LUIGGI</div>
-                <div>{BRANCHES.find((b) => b.id === ticket.branch)?.name}</div>
+                {settings.logoUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={settings.logoUrl} alt={businessName} className="size-12 object-contain" />
+                )}
+                <div className="font-display text-base font-semibold tracking-[0.2em] uppercase">{businessName}</div>
+                <div>{allBranches.find((b) => b.id === ticket.branch)?.name}</div>
                 <div>{fDateTime(ticket.date)}</div>
                 <div>
                   Folio {ticket.folio} · Atendió {ticket.seller}
@@ -376,7 +400,9 @@ export default function PosPage() {
                 <span>{PAYMENT_LABEL[ticket.payments[0]?.method ?? "efectivo"]}</span>
                 <span>{mxn(ticket.total)}</span>
               </div>
-              <div className="mt-3 text-center">¡Gracias por tu compra! · @clothingluiggi</div>
+              {(settings.ticketFooter || settings.instagram) && (
+                <div className="mt-3 text-center">{[settings.ticketFooter, settings.instagram].filter(Boolean).join(" · ")}</div>
+              )}
             </div>
           )}
           <DialogFooter>

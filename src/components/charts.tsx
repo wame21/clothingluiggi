@@ -9,9 +9,11 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { CHANNEL_COLOR, CHANNEL_LABEL, CHANNELS } from "@/lib/constants";
+import { useMemo } from "react";
+import { CHANNEL_COLOR, CHANNEL_LABEL, CHANNELS as ALL_CHANNELS } from "@/lib/constants";
 import { fDay, mxn, mxnShort, num } from "@/lib/format";
 import type { DailyRow } from "@/lib/metrics";
+import { useChannels } from "@/lib/store";
 
 const AXIS = { fontSize: 11, fill: "var(--muted-foreground)" };
 
@@ -58,6 +60,12 @@ function TooltipBox({ title, rows }: { title: string; rows: TipRow[] }) {
 /* Ventas diarias apiladas por canal                                    */
 /* ------------------------------------------------------------------ */
 export function ChannelStackedBars({ data, height = 260 }: { data: DailyRow[]; height?: number }) {
+  const active = useChannels();
+  // Un canal desactivado con ventas históricas se sigue mostrando para que el total cuadre
+  const CHANNELS = useMemo(
+    () => ALL_CHANNELS.filter((c) => active.includes(c) || data.some((r) => r[c] > 0)),
+    [active, data],
+  );
   const last = CHANNELS[CHANNELS.length - 1];
   return (
     <div className="flex flex-col gap-3">

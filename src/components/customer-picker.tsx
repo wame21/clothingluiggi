@@ -26,7 +26,7 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CUSTOMER_TYPE_LABEL } from "@/lib/constants";
-import { errorMessage, useErp } from "@/lib/store";
+import { errorMessage, useErp, useWholesaleEnabled } from "@/lib/store";
 import type { Customer, CustomerType } from "@/lib/types";
 
 export function NewCustomerDialog({
@@ -40,7 +40,9 @@ export function NewCustomerDialog({
 }) {
   const addCustomer = useErp((s) => s.addCustomer);
   const [open, setOpen] = useState(false);
-  const empty = { name: "", business: "", phone: "", city: "Guasave", state: "Sinaloa", type: defaultType, instagram: "", rfc: "" };
+  const wholesaleOn = useWholesaleEnabled();
+  const city = useErp((s) => s.profileSettings.city);
+  const empty = { name: "", business: "", phone: "", city, state: "", type: defaultType, instagram: "", rfc: "" };
   const [form, setForm] = useState(empty);
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -79,28 +81,30 @@ export function NewCustomerDialog({
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="grid gap-1.5 sm:col-span-2">
             <Label>Nombre completo *</Label>
-            <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Ej. Ramón Inzunza" />
+            <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Nombre y apellido" />
           </div>
           <div className="grid gap-1.5">
             <Label>WhatsApp *</Label>
-            <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="687 000 0000" />
+            <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="10 dígitos" />
           </div>
-          <div className="grid gap-1.5">
-            <Label>Tipo de cliente</Label>
-            <Select value={form.type} onValueChange={(v) => setForm((f) => ({ ...f, type: v as CustomerType }))}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(CUSTOMER_TYPE_LABEL) as CustomerType[]).map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {CUSTOMER_TYPE_LABEL[t]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {form.type !== "menudeo" && (
+          {wholesaleOn && (
+            <div className="grid gap-1.5">
+              <Label>Tipo de cliente</Label>
+              <Select value={form.type} onValueChange={(v) => setForm((f) => ({ ...f, type: v as CustomerType }))}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(CUSTOMER_TYPE_LABEL) as CustomerType[]).map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {CUSTOMER_TYPE_LABEL[t]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {wholesaleOn && form.type !== "menudeo" && (
             <>
               <div className="grid gap-1.5">
                 <Label>Negocio</Label>
@@ -148,6 +152,7 @@ export function CustomerSelect({
   allowGeneral?: boolean;
 }) {
   const customers = useErp((s) => s.customers);
+  const wholesaleOn = useWholesaleEnabled();
   const [open, setOpen] = useState(false);
   const list = customers.filter((c) => (wholesaleOnly ? c.type !== "menudeo" : true));
   const selected = customers.find((c) => c.id === value);
@@ -205,7 +210,8 @@ export function CustomerSelect({
                       <div className="truncate">{c.business ?? c.name}</div>
                       <div className="text-xs text-muted-foreground">
                         {c.business ? `${c.name} · ` : ""}
-                        {c.city} · {CUSTOMER_TYPE_LABEL[c.type]}
+                        {c.city}
+                        {wholesaleOn && ` · ${CUSTOMER_TYPE_LABEL[c.type]}`}
                       </div>
                     </div>
                   </CommandItem>

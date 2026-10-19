@@ -1,8 +1,10 @@
+"use client";
+
 import { BrandMark } from "@/components/brand";
-import { BUSINESS } from "@/lib/constants";
 import { fLongDate, mxnCents } from "@/lib/format";
 import type { Customer, LineItem } from "@/lib/types";
 import { formatClabe } from "@/lib/clabe";
+import { useBusinessName, useErp } from "@/lib/store";
 import { WHOLESALE_TERMS } from "@/lib/wholesale";
 
 interface Props {
@@ -37,6 +39,9 @@ function groupItems(items: LineItem[]) {
 }
 
 export function SalesDocument(p: Props) {
+  const businessName = useBusinessName();
+  const biz = useErp((s) => s.profileSettings);
+  const contact = [biz.phone && `Tel. ${biz.phone}`, biz.instagram, biz.web].filter(Boolean);
   const groups = groupItems(p.items);
   const pieces = p.items.reduce((a, it) => a + it.qty, 0);
   const subtotalList = p.items.reduce((a, it) => a + it.qty * it.listPrice, 0);
@@ -52,13 +57,15 @@ export function SalesDocument(p: Props) {
         <div className="flex items-center gap-4">
           <BrandMark className="size-14 text-xl" />
           <div>
-            <div className="font-display text-2xl font-semibold tracking-[0.2em]">LUIGGI</div>
-            <div className="text-[11px] uppercase tracking-[0.25em] text-neutral-500">Boutique · Mayoreo y menudeo</div>
-            <div className="mt-2 text-xs leading-relaxed text-neutral-500">
-              {BUSINESS.city} · Envíos a todo México
-              <br />
-              WhatsApp {BUSINESS.phone} · {BUSINESS.instagram} · {BUSINESS.web}
-            </div>
+            <div className="font-display text-2xl font-semibold uppercase tracking-[0.2em]">{businessName}</div>
+            {biz.legalName && <div className="text-[11px] uppercase tracking-[0.25em] text-neutral-500">{biz.legalName}</div>}
+            {(biz.city || contact.length > 0) && (
+              <div className="mt-2 text-xs leading-relaxed text-neutral-500">
+                {biz.city}
+                {biz.city && contact.length > 0 && <br />}
+                {contact.join(" · ")}
+              </div>
+            )}
           </div>
         </div>
         <div className="text-left sm:text-right">
@@ -199,7 +206,7 @@ export function SalesDocument(p: Props) {
       </div>
 
       <div className="mt-8 border-t border-neutral-200 pt-4 text-center text-[11px] tracking-wide text-neutral-400">
-        Gracias por tu preferencia · Luiggi Boutique · Guasave, Sinaloa
+        Gracias por tu preferencia · {businessName}
       </div>
     </div>
   );

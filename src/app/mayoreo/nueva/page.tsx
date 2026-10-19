@@ -3,7 +3,7 @@
 import { ArrowLeft, FileCheck2, PackagePlus, Save, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { CustomerSelect } from "@/components/customer-picker";
 import { PageHeader } from "@/components/erp";
@@ -17,36 +17,49 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { CUSTOMER_TYPE_LABEL } from "@/lib/constants";
 import { mxn, pct } from "@/lib/format";
-import { errorMessage, useErp, useIsOwner } from "@/lib/store";
-import type { Product, Quote } from "@/lib/types";
+import { errorMessage, useErp, useIsOwner, useWarehouse, useWholesaleEnabled } from "@/lib/store";
+import type { Branch, Product, Quote } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { buildLineItems, qtyTotal, stockOf, type QtyMap } from "@/lib/variants";
-import {
-  DISTRIBUTOR_CUSTOMER_MIN,
-  expandPackage,
-  nextTier,
-  PACKAGES,
-  shippingFor,
-  tierFor,
-  tierPrice,
-  TIERS,
-  WHOLESALE_TERMS,
-  type WholesalePackage,
-} from "@/lib/wholesale";
+import { expandPackage, nextTier, shippingFor, tierFor, tierPrice, type WholesalePackage } from "@/lib/wholesale";
+import { NoWarehouseNotice, WholesaleDisabled } from "../_comunes";
 
 const DAY = 86_400_000;
 
 export default function NuevaCotizacionPage() {
   return (
     <Suspense>
-      <QuoteBuilder />
+      <QuoteGate />
     </Suspense>
   );
 }
 
+function QuoteGate() {
+  const enabled = useWholesaleEnabled();
+  const warehouse = useWarehouse();
+  if (!enabled) return <WholesaleDisabled />;
+  if (!warehouse)
+    return (
+      <>
+        <PageHeader
+          title="Nueva cotización de mayoreo"
+          actions={
+            <Button asChild variant="ghost" className="h-9">
+              <Link href="/mayoreo">
+                <ArrowLeft /> Mayoreo
+              </Link>
+            </Button>
+          }
+        />
+        <NoWarehouseNotice />
+      </>
+    );
+  return <QuoteBuilder warehouse={warehouse} />;
+}
+
 const idsFromQty = (q: QtyMap) => [...new Set(Object.keys(q).filter((k) => q[k] > 0).map((k) => k.split("|")[0]))];
 
-function QuoteBuilder() {
+function QuoteBuilder({ warehouse }: { warehouse: Branch }) {
   const router = useRouter();
   const params = useSearchParams();
   const owner = useIsOwner();
@@ -54,15 +67,18 @@ function QuoteBuilder() {
   const stock = useErp((s) => s.stock);
   const customers = useErp((s) => s.customers);
   const saveQuote = useErp((s) => s.saveQuote);
+  const wholesale = useErp((s) => s.wholesale);
+  const tiers = useMemo(() => [...wholesale.tiers].sort((a, b) => a.minPieces - b.minPieces), [wholesale.tiers]);
+  const packages = wholesale.packages;
 
   const editId = params.get("id");
   const [existing] = useState(() => useErp.getState().quotes.find((q) => q.id === editId));
   const [customerId, setCustomerId] = useState<string | undefined>(existing?.customerId);
   const [qty, setQty] = useState<QtyMap>(() => {
     if (existing) return Object.fromEntries(existing.items.map((i) => [i.variantKey, i.qty]));
-    const pkg = PACKAGES.find((p) => p.id === params.get("paquete"));
     const s = useErp.getState();
-    return pkg ? expandPackage(pkg, s.products, s.stock, "bodega").lines : {};
+    const pkg = s.wholesale.packages.find((p) => p.id === params.get("paquete"));
+    return pkg ? expandPackage(pkg, s.products, s.stock, warehouse.id).lines : {};
   });
   const [productIds, setProductIds] = useState<string[]>(() => idsFromQty(qty));
   const [notes, setNotes] = useState(existing?.notes ?? "");
@@ -79,7 +95,7 @@ function QuoteBuilder() {
   const cost = items.reduce((a, it) => a + it.qty * it.unitCost, 0);
   const shipping = freeShipping ? 0 : shippingFor(subtotal);
   const total = subtotal + shipping;
-  const shortages = items.filter((it) => it.qty > stockOf(stock, it.variantKey, "bodega"));
+  const shortages = items.filter((it) => it.qty > stockOf(stock, it.variantKey, warehouse.id));
   const nextMin = next ? pieces + next.missing : pieces;
   const nextSaving = next ? Math.round(subtotalList * (next.tier.discount - tier.discount)) : 0;
 
@@ -87,14 +103,14 @@ function QuoteBuilder() {
     const s = useErp.getState();
     // Descuenta lo ya capturado para no sobrepasar el stock disponible
     const adjusted = { ...s.stock };
-    for (const [k, v] of Object.entries(qty)) if (adjusted[k]) adjusted[k] = { ...adjusted[k], bodega: adjusted[k].bodega - v };
-    const { lines, shortfall } = expandPackage(pkg, s.products, adjusted, "bodega");
+    for (const [k, v] of Object.entries(qty)) if (adjusted[k]) adjusted[k] = { ...adjusted[k], [warehouse.id]: (adjusted[k][warehouse.id] ?? 0) - v };
+    const { lines, shortfall } = expandPackage(pkg, s.products, adjusted, warehouse.id);
     const merged = { ...qty };
     for (const [k, v] of Object.entries(lines)) merged[k] = (merged[k] ?? 0) + v;
     setQty(merged);
     setProductIds([...new Set([...productIds, ...idsFromQty(lines)])]);
     toast.success(`${pkg.name} agregado con curva de tallas`, {
-      description: shortfall ? `${shortfall} pzs no se pudieron surtir por falta de stock` : "Todo con stock disponible en bodega",
+      description: shortfall ? `${shortfall} pzs no se pudieron surtir por falta de stock` : `Todo con stock disponible en ${warehouse.short}`,
     });
   };
 
@@ -111,7 +127,7 @@ function QuoteBuilder() {
       q = await saveQuote({
       id: existing?.id,
       date,
-      validUntil: new Date(new Date(date).getTime() + WHOLESALE_TERMS.validityDays * DAY).toISOString(),
+      validUntil: new Date(new Date(date).getTime() + wholesale.validityDays * DAY).toISOString(),
       customerId: customer.id,
       customerName: customer.business ?? customer.name,
       items,
@@ -121,7 +137,7 @@ function QuoteBuilder() {
       subtotal,
       shipping,
       total,
-      depositPct: WHOLESALE_TERMS.depositPct,
+      depositPct: wholesale.depositPct,
       status,
       notes: notes.trim() || undefined,
       });
@@ -158,44 +174,48 @@ function QuoteBuilder() {
               {customer && (
                 <p className="text-xs text-muted-foreground">
                   {CUSTOMER_TYPE_LABEL[customer.type]} · {customer.city}, {customer.state} · Tel. {customer.phone}
-                  {customer.type === "distribuidor" && ` · desbloquea precio distribuidor desde ${DISTRIBUTOR_CUSTOMER_MIN} pzs`}
+                  {customer.type === "distribuidor" &&
+                    wholesale.distributorCustomerMin > 0 &&
+                    ` · desbloquea precio distribuidor desde ${wholesale.distributorCustomerMin} pzs`}
                 </p>
               )}
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Sparkles className="size-4 text-gold" /> Armar rápido con un paquete
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-2 md:grid-cols-3">
-              {PACKAGES.map((pkg) => (
-                <button
-                  key={pkg.id}
-                  onClick={() => addPackage(pkg)}
-                  className="flex flex-col items-start gap-1 rounded-xl border p-3 text-left transition-colors hover:border-gold/60 hover:bg-gold/5"
-                >
-                  <span className="flex w-full items-center justify-between text-sm font-medium">
-                    {pkg.name}
-                    <PackagePlus className="size-4 text-muted-foreground" />
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {pkg.pieces} pzs · {pkg.mix.map((m) => m.category.split(" ")[0]).join(", ")}
-                  </span>
-                </button>
-              ))}
-            </CardContent>
-          </Card>
+          {packages.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Sparkles className="size-4 text-gold" /> Armar rápido con un paquete
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-2 md:grid-cols-3">
+                {packages.map((pkg) => (
+                  <button
+                    key={pkg.id}
+                    onClick={() => addPackage(pkg)}
+                    className="flex flex-col items-start gap-1 rounded-xl border p-3 text-left transition-colors hover:border-gold/60 hover:bg-gold/5"
+                  >
+                    <span className="flex w-full items-center justify-between text-sm font-medium">
+                      {pkg.name}
+                      <PackagePlus className="size-4 text-muted-foreground" />
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {pkg.pieces} pzs · {pkg.mix.map((m) => m.category.split(" ")[0]).join(", ")}
+                    </span>
+                  </button>
+                ))}
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">Productos · corrida de tallas (stock de bodega)</CardTitle>
+              <CardTitle className="text-sm">Productos · corrida de tallas (stock de {warehouse.short})</CardTitle>
             </CardHeader>
             <CardContent>
               <ItemsBuilder
-                branch="bodega"
+                branch={warehouse.id}
                 qty={qty}
                 setQty={setQty}
                 unitPriceOf={unitPriceOf}
@@ -220,8 +240,8 @@ function QuoteBuilder() {
                 </div>
               </div>
               <div className="flex gap-1">
-                {TIERS.map((t, i) => (
-                  <div key={t.id} className={cn("h-1.5 flex-1 rounded-full", i <= TIERS.indexOf(tier) ? "bg-gold" : "bg-muted")} />
+                {tiers.map((t, i) => (
+                  <div key={t.id} className={cn("h-1.5 flex-1 rounded-full", i <= tiers.findIndex((x) => x.id === tier.id) ? "bg-gold" : "bg-muted")} />
                 ))}
               </div>
               {next ? (
@@ -248,15 +268,19 @@ function QuoteBuilder() {
               <Row label={`Descuento ${tier.name}`} value={`−${mxn(subtotalList - subtotal)}`} gold={subtotalList > subtotal} />
               <Row label="Subtotal" value={mxn(subtotal)} />
               <Row label="Envío" value={shipping ? mxn(shipping) : "Sin costo"} />
-              <div className="flex items-center justify-between gap-3 py-1">
-                <Label htmlFor="free-ship" className="text-xs font-normal text-muted-foreground">
-                  Regalar el envío {subtotal < WHOLESALE_TERMS.freeShippingFrom && `(gratis desde ${mxn(WHOLESALE_TERMS.freeShippingFrom)})`}
-                </Label>
-                <Switch id="free-ship" checked={freeShipping} onCheckedChange={setFreeShipping} />
-              </div>
+              {wholesale.flatShipping > 0 && (
+                <div className="flex items-center justify-between gap-3 py-1">
+                  <Label htmlFor="free-ship" className="text-xs font-normal text-muted-foreground">
+                    Regalar el envío {wholesale.freeShippingFrom > 0 && subtotal < wholesale.freeShippingFrom && `(gratis desde ${mxn(wholesale.freeShippingFrom)})`}
+                  </Label>
+                  <Switch id="free-ship" checked={freeShipping} onCheckedChange={setFreeShipping} />
+                </div>
+              )}
               <Separator className="my-1" />
               <Row label="Total" value={mxn(total)} strong />
-              <Row label={`Anticipo para apartar (${WHOLESALE_TERMS.depositPct * 100}%)`} value={mxn(Math.round(total * WHOLESALE_TERMS.depositPct))} />
+              {wholesale.depositPct > 0 && (
+                <Row label={`Anticipo para apartar (${Math.round(wholesale.depositPct * 100)}%)`} value={mxn(Math.round(total * wholesale.depositPct))} />
+              )}
               {owner && subtotal > 0 && (
                 <div className="mt-2 flex flex-col gap-1 rounded-lg bg-muted/60 px-3 py-2 text-xs">
                   <Row label="Costo de la mercancía" value={mxn(cost)} />
@@ -265,7 +289,7 @@ function QuoteBuilder() {
               )}
               {shortages.length > 0 && (
                 <p className="mt-2 rounded-md bg-warning/15 px-3 py-2 text-xs text-warning">
-                  {shortages.length} variante(s) superan el stock de bodega. Puedes cotizarlas, pero habrá que reabastecer o traspasar antes de surtir.
+                  {shortages.length} variante(s) superan el stock de {warehouse.short}. Puedes cotizarlas, pero habrá que reabastecer o traspasar antes de surtir.
                 </p>
               )}
               <div className="mt-2 grid gap-1.5">

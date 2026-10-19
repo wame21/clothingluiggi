@@ -15,7 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { CUSTOMER_TYPE_LABEL } from "@/lib/constants";
 import { fDate, fRelative, mxn, num } from "@/lib/format";
 import { orderBalance } from "@/lib/metrics";
-import { useErp } from "@/lib/store";
+import { useBusinessName, useErp, useWholesaleEnabled } from "@/lib/store";
 import type { Customer, CustomerType, Order } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +42,7 @@ function Clientes() {
   const params = useSearchParams();
   const customers = useErp((s) => s.customers);
   const orders = useErp((s) => s.orders);
+  const wholesaleOn = useWholesaleEnabled();
   const [q, setQ] = useState("");
   const [type, setType] = useState<CustomerType | "all" | "inactivos">("all");
   const [selected, setSelected] = useState<string | null>(params.get("c"));
@@ -80,7 +81,7 @@ function Clientes() {
     <>
       <PageHeader
         title="Clientes"
-        description="Historial, saldos y frecuencia de compra de cada cliente, de menudeo y de mayoreo."
+        description={`Historial, saldos y frecuencia de compra de cada cliente${wholesaleOn ? ", de menudeo y de mayoreo" : ""}.`}
         actions={
           <NewCustomerDialog
             trigger={
@@ -93,16 +94,21 @@ function Clientes() {
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label="Clientes registrados" value={num(customers.length)} hint={<span>{wholesale.length} mayoristas y distribuidores</span>} icon={Users} />
-        <KpiCard label="Top 5 mayoristas" value={mxn(wholesale.slice(0, 5).reduce((a, r) => a + r.total, 0))} hint="compras acumuladas" icon={Wallet} accent />
+        <KpiCard
+          label="Clientes registrados"
+          value={num(customers.length)}
+          hint={wholesaleOn ? <span>{wholesale.length} mayoristas y distribuidores</span> : "en tu cartera"}
+          icon={Users}
+        />
+        {wholesaleOn && <KpiCard label="Top 5 mayoristas" value={mxn(wholesale.slice(0, 5).reduce((a, r) => a + r.total, 0))} hint="compras acumuladas" icon={Wallet} accent />}
         <KpiCard label="Saldos por cobrar" value={mxn(ar)} hint="anticipos y pedidos pendientes" icon={Wallet} />
-        <KpiCard label="Mayoristas sin comprar 30+ días" value={num(wholesale.filter((r) => r.inactive).length)} hint="oportunidad para reactivar" icon={AlertCircle} />
+        {wholesaleOn && <KpiCard label="Mayoristas sin comprar 30+ días" value={num(wholesale.filter((r) => r.inactive).length)} hint="oportunidad para reactivar" icon={AlertCircle} />}
       </div>
 
       <Card className="mt-4 gap-0 py-0">
         <div className="flex flex-col gap-3 border-b p-4 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap gap-1.5">
-            {(["all", "menudeo", "mayorista", "distribuidor", "inactivos"] as const).map((t) => (
+            {(wholesaleOn ? (["all", "menudeo", "mayorista", "distribuidor", "inactivos"] as const) : (["all", "menudeo"] as const)).map((t) => (
               <button
                 key={t}
                 onClick={() => setType(t)}
@@ -163,6 +169,8 @@ function Clientes() {
 
 function CustomerSheet({ row, now }: { row: Row; now: number }) {
   const allQuotes = useErp((s) => s.quotes);
+  const businessName = useBusinessName();
+  const wholesaleOn = useWholesaleEnabled();
   const c = row.customer;
   const quotes = allQuotes.filter((q) => q.customerId === c.id);
   const pieces = row.orders.reduce((a, o) => a + o.items.reduce((b, it) => b + it.qty, 0), 0);
@@ -173,9 +181,9 @@ function CustomerSheet({ row, now }: { row: Row; now: number }) {
   const favorite = [...favMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
   const waPhone = `52${c.phone.replace(/\D/g, "")}`;
   const waText = encodeURIComponent(
-    c.type === "menudeo"
-      ? `Hola ${c.name.split(" ")[0]}, te saluda Luiggi Boutique. Nos llegó mercancía nueva que te va a gustar.`
-      : `Hola ${c.name.split(" ")[0]}, te saluda Luiggi. Ya tenemos nuevos modelos para tu tienda y precios de mayoreo actualizados. ¿Te mando la cotización?`,
+    !wholesaleOn || c.type === "menudeo"
+      ? `Hola ${c.name.split(" ")[0]}, te saluda ${businessName}. Nos llegó mercancía nueva que te va a gustar.`
+      : `Hola ${c.name.split(" ")[0]}, te saluda ${businessName}. Ya tenemos nuevos modelos para tu tienda y precios de mayoreo actualizados. ¿Te mando la cotización?`,
   );
 
   return (
@@ -184,7 +192,7 @@ function CustomerSheet({ row, now }: { row: Row; now: number }) {
         <SheetTitle className="text-lg">{c.business ?? c.name}</SheetTitle>
         <SheetDescription>
           {c.business && `${c.name} · `}
-          {CUSTOMER_TYPE_LABEL[c.type]} · {c.city}, {c.state} · cliente desde {fDate(c.since)}
+          {CUSTOMER_TYPE_LABEL[c.type]} · {[c.city, c.state].filter(Boolean).join(", ")} · cliente desde {fDate(c.since)}
         </SheetDescription>
       </SheetHeader>
       <div className="flex flex-col gap-5 px-4 pb-6">
@@ -199,7 +207,7 @@ function CustomerSheet({ row, now }: { row: Row; now: number }) {
               <MessageCircle /> Escribir por WhatsApp
             </a>
           </Button>
-          {c.type !== "menudeo" && (
+          {wholesaleOn && c.type !== "menudeo" && (
             <Button asChild size="sm" variant="outline">
               <Link href="/mayoreo/nueva">Nueva cotización</Link>
             </Button>

@@ -10,10 +10,10 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CHANNEL_COLOR, CHANNEL_LABEL, CHANNELS } from "@/lib/constants";
+import { CHANNEL_COLOR, CHANNEL_LABEL } from "@/lib/constants";
 import { fDateTime, mxn, num } from "@/lib/format";
 import { orderBalance, orderUnits } from "@/lib/metrics";
-import { useErp } from "@/lib/store";
+import { useChannels, useErp } from "@/lib/store";
 import type { Channel, OrderStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -27,11 +27,18 @@ const TABS: { id: string; label: string; statuses: OrderStatus[] | null }[] = [
 
 export default function PedidosPage() {
   const orders = useErp((s) => s.orders);
+  const activeChannels = useChannels();
   const router = useRouter();
   const [tab, setTab] = useState("atender");
   const [channel, setChannel] = useState<Channel | "all">("all");
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(40);
+
+  // Los canales del negocio más cualquiera que ya tenga pedidos (p. ej. uno que se desactivó después).
+  const channels = useMemo(() => {
+    const used = new Set(orders.map((o) => o.channel));
+    return [...activeChannels, ...[...used].filter((c) => !activeChannels.includes(c))];
+  }, [activeChannels, orders]);
 
   const stats = useMemo(() => {
     const pending = orders.filter((o) => o.status === "pendiente");
@@ -58,7 +65,7 @@ export default function PedidosPage() {
     <>
       <PageHeader
         title="Pedidos"
-        description="Todos tus canales en un solo lugar: tienda, WhatsApp, Instagram, página web y mayoreo."
+        description="Todos tus canales de venta en un solo lugar."
         actions={
           <Button asChild className="h-9">
             <Link href="/pedidos/nuevo">
@@ -98,7 +105,7 @@ export default function PedidosPage() {
           >
             Todos los canales
           </button>
-          {CHANNELS.map((c) => (
+          {channels.map((c) => (
             <button
               key={c}
               onClick={() => setChannel(c)}

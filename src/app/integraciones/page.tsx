@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { PageHeader } from "@/components/erp";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { BUSINESS } from "@/lib/constants";
+import { useErp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 const PHASES = [
@@ -19,6 +19,8 @@ const PHASES = [
 ];
 
 export default function IntegracionesPage() {
+  const web = useErp((s) => s.profileSettings.web);
+  const carriers = useErp((s) => s.sales.carriers);
   return (
     <>
       <PageHeader
@@ -34,12 +36,13 @@ export default function IntegracionesPage() {
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-semibold">WooCommerce · {BUSINESS.web}</span>
+                <span className="font-semibold">WooCommerce{web && ` · ${web}`}</span>
                 <Badge className={STATUS.phase2.cls}>{STATUS.phase2.label}</Badge>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 Los pedidos de la web entrarán como pedidos del ERP y cada venta en tienda o WhatsApp descontará el stock de la página. Mientras tanto,
                 registra los pedidos web desde Pedidos → Nuevo pedido.
+                {!web && " Agrega la dirección de tu tienda web en Configuración."}
               </p>
             </div>
           </div>
@@ -69,7 +72,7 @@ export default function IntegracionesPage() {
           icon={<Truck className="size-5" />}
           title="Guías de paquetería"
           status="phase2"
-          description="Cotiza y genera guías de Estafeta, FedEx, DHL o J&T desde el pedido; el cliente recibe su rastreo por WhatsApp."
+          description={`Cotiza y genera guías${carriers.length ? ` de ${carriers.join(", ")}` : " de tu paquetería"} desde el pedido; el cliente recibe su rastreo por WhatsApp.`}
         />
         <Integration
           icon={<FileBadge className="size-5" />}

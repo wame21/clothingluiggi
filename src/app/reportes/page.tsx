@@ -6,21 +6,27 @@ import { SimpleBars } from "@/components/charts";
 import { ChannelDot, PageHeader, PeriodSelect, SectionTitle, ShareBar } from "@/components/erp";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CHANNEL_LABEL } from "@/lib/constants";
 import { mxn, num, pct } from "@/lib/format";
-import { byChannel, inRange, isSale, orderCost, orderNet, periodRange, productStats, sizeStats, type Period } from "@/lib/metrics";
-import { useErp } from "@/lib/store";
+import { byChannel, inRange, isSale, orderCost, orderNet, periodRange, productStats, type Period } from "@/lib/metrics";
+import { useBranchName, useCategories, useErp, usePosBranches, useWholesaleEnabled } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 const WEEKDAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
-const TOP_SIZES = ["S", "M", "L", "XL", "XXL"];
-const BOTTOM_SIZES = ["28", "30", "32", "34", "36"];
+const ALL_CATEGORIES = "todas";
 
 export default function ReportesPage() {
   const orders = useErp((s) => s.orders);
   const products = useErp((s) => s.products);
   const customers = useErp((s) => s.customers);
+  const sizePresets = useErp((s) => s.catalog.sizePresets);
+  const categories = useCategories();
+  const posList = usePosBranches();
+  const branchName = useBranchName();
+  const wholesaleOn = useWholesaleEnabled();
   const [period, setPeriod] = useState<Period>("90d");
+  const [sizeCategory, setSizeCategory] = useState(ALL_CATEGORIES);
 
   const d = useMemo(() => {
     const { cur } = periodRange(period);
@@ -43,6 +49,13 @@ export default function ReportesPage() {
     const weekday = Array.from({ length: 7 }, () => ({ revenue: 0, days: new Set<string>() }));
     const stores = new Map<string, { revenue: number; tickets: number }>();
     const buyers = new Map<string, { revenue: number; orders: number }>();
+    const categoryOf = new Map(products.map((p) => [p.id, p.category]));
+    const sizes = new Map<string, Map<string, number>>();
+    const addSize = (key: string, size: string, qty: number) => {
+      const m = sizes.get(key) ?? new Map<string, number>();
+      m.set(size, (m.get(size) ?? 0) + qty);
+      sizes.set(key, m);
+    };
     let net = 0;
     let cost = 0;
     for (const o of orders) {
@@ -52,6 +65,11 @@ export default function ReportesPage() {
       weekday[dt.getDay()].days.add(dt.toDateString());
       net += orderNet(o);
       cost += orderCost(o);
+      for (const it of o.items) {
+        addSize(ALL_CATEGORIES, it.size, it.qty);
+        const cat = categoryOf.get(it.productId);
+        if (cat) addSize(cat, it.size, it.qty);
+      }
       if (o.channel === "tienda") {
         const s = stores.get(o.branch) ?? { revenue: 0, tickets: 0 };
         s.revenue += orderNet(o);
@@ -79,7 +97,7 @@ export default function ReportesPage() {
       totalRevenue,
       abc,
       totalProfit,
-      sizes: sizeStats(orders, cur),
+      sizes,
       weekday: weekday.map((w, i) => ({ label: WEEKDAYS[i], value: w.days.size ? w.revenue / w.days.size : 0, hint: "Venta promedio" })),
       stores: [...stores.entries()].map(([id, s]) => ({ id, ...s })),
       buyers: [...buyers.entries()]
@@ -87,19 +105,42 @@ export default function ReportesPage() {
         .sort((a, b) => b.revenue - a.revenue)
         .slice(0, 6),
       insights: [
-        wholesale &&
+        wholesaleOn &&
+          wholesale &&
           `El mayoreo aporta ${pct(wholesale.revenue / (totalRevenue || 1), 0)} de tus ventas con margen bruto de ${pct(wholesale.margin, 0)} (menudeo: ${pct(retailMargin, 0)}). Vendes volumen con menos margen: cuida que el anticipo cubra el costo.`,
-        `WhatsApp, Instagram y la web suman ${pct(online / (totalRevenue || 1), 0)} de las ventas. Hoy esos pedidos se capturan a mano; con la integración entrarían solos.`,
+        online > 0 &&
+          `Las ventas en línea (web, WhatsApp e Instagram) suman ${pct(online / (totalRevenue || 1), 0)} de tus ventas.`,
         `Por cada $100 que vendes, $${Math.round((net ? cost / net : 0) * 100)} son costo de mercancía.`,
       ].filter(Boolean) as string[],
     };
-  }, [period, orders, products, customers]);
+  }, [period, orders, products, customers, wholesaleOn]);
 
-  const sizeData = (list: string[]) => list.map((s) => ({ label: s, value: d.sizes.get(s) ?? 0 })).filter((x) => x.value > 0);
-  const topSizes = sizeData(TOP_SIZES);
-  const bottomSizes = sizeData(BOTTOM_SIZES);
-  const topTotal = topSizes.reduce((a, x) => a + x.value, 0);
-  const storeTotal = d.stores.reduce((a, s) => a + s.revenue, 0);
+  // Orden de tallas según los grupos de tallas del negocio (el más largo primero); las que no estén en ninguno van al final
+  const sizeRank = useMemo(() => {
+    const rank = new Map<string, number>();
+    for (const preset of [...sizePresets].sort((a, b) => b.sizes.length - a.sizes.length))
+      for (const size of preset.sizes) if (!rank.has(size)) rank.set(size, rank.size);
+    return rank;
+  }, [sizePresets]);
+
+  const sizeCategories = useMemo(
+    () => [...categories, ...new Set(products.map((p) => p.category))].filter((c, i, all) => all.indexOf(c) === i),
+    [categories, products],
+  );
+  const sizeData = [...(d.sizes.get(sizeCategory) ?? [])]
+    .map(([label, value]) => ({ label, value }))
+    .sort(
+      (a, b) =>
+        (sizeRank.get(a.label) ?? Infinity) - (sizeRank.get(b.label) ?? Infinity) ||
+        a.label.localeCompare(b.label, "es", { numeric: true }),
+    );
+  const sizeTotal = sizeData.reduce((a, x) => a + x.value, 0);
+
+  const stores = [
+    ...d.stores,
+    ...posList.filter((b) => !d.stores.some((s) => s.id === b.id)).map((b) => ({ id: b.id, revenue: 0, tickets: 0 })),
+  ].sort((a, b) => b.revenue - a.revenue);
+  const storeTotal = stores.reduce((a, s) => a + s.revenue, 0);
 
   return (
     <>
@@ -214,31 +255,43 @@ export default function ReportesPage() {
           </div>
         </Card>
 
-        <div className="flex flex-col gap-4">
-          <Card>
-            <CardHeader>
-              <SectionTitle>Curva real de tallas · camisas, polos y playeras</SectionTitle>
-            </CardHeader>
-            <CardContent>
-              <SimpleBars data={topSizes} height={180} />
+        <Card>
+          <CardHeader>
+            <SectionTitle
+              action={
+                <Select value={sizeCategory} onValueChange={setSizeCategory}>
+                  <SelectTrigger size="sm" className="w-44">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_CATEGORIES}>Todas las categorías</SelectItem>
+                    {sizeCategories.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              }
+            >
+              Curva real de tallas
+            </SectionTitle>
+          </CardHeader>
+          <CardContent>
+            <SimpleBars data={sizeData} height={220} />
+            {sizeData.length > 0 ? (
               <p className="mt-2 text-xs text-muted-foreground">
-                Compra en esta proporción: {topSizes.map((s) => `${s.label} ${pct(s.value / (topTotal || 1), 0)}`).join(" · ")}. Así evitas quedarte con
+                Compra en esta proporción: {sizeData.map((s) => `${s.label} ${pct(s.value / (sizeTotal || 1), 0)}`).join(" · ")}. Así evitas quedarte con
                 tallas que no rotan.
               </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <SectionTitle>Curva real de tallas · pantalones, jeans y shorts</SectionTitle>
-            </CardHeader>
-            <CardContent>
-              <SimpleBars data={bottomSizes} height={160} color="var(--ch-web)" />
-            </CardContent>
-          </Card>
-        </div>
+            ) : (
+              <p className="mt-2 text-xs text-muted-foreground">Sin ventas de esta categoría en el periodo.</p>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+      <div className={cn("mt-4 grid gap-4", wholesaleOn ? "lg:grid-cols-3" : "lg:grid-cols-2")}>
         <Card>
           <CardHeader>
             <SectionTitle>Venta promedio por día de la semana</SectionTitle>
@@ -251,40 +304,44 @@ export default function ReportesPage() {
 
         <Card>
           <CardHeader>
-            <SectionTitle>Sucursales físicas</SectionTitle>
+            <SectionTitle>Ventas por sucursal</SectionTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            {d.stores.map((s) => (
+            {stores.map((s) => (
               <ShareBar
                 key={s.id}
-                label={s.id === "andara" ? "Plaza Andara" : "Bamoa"}
+                label={branchName(s.id)}
                 value={mxn(s.revenue)}
                 share={storeTotal ? s.revenue / storeTotal : 0}
                 color="var(--ch-tienda)"
                 sub={`${num(s.tickets)} tickets · ticket promedio ${mxn(s.revenue / (s.tickets || 1))}`}
               />
             ))}
+            {stores.length === 0 && <p className="text-sm text-muted-foreground">Sin sucursales con mostrador.</p>}
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <SectionTitle>Mejores clientes de mayoreo</SectionTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col divide-y">
-            {d.buyers.map((b) => (
-              <div key={b.customer?.id} className="flex items-center justify-between gap-3 py-2 text-sm first:pt-0">
-                <div className="min-w-0">
-                  <div className="truncate font-medium">{b.customer?.business ?? b.customer?.name}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {b.customer?.city} · {b.orders} pedidos
+        {wholesaleOn && (
+          <Card>
+            <CardHeader>
+              <SectionTitle>Mejores clientes de mayoreo</SectionTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col divide-y">
+              {d.buyers.map((b) => (
+                <div key={b.customer?.id} className="flex items-center justify-between gap-3 py-2 text-sm first:pt-0">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{b.customer?.business ?? b.customer?.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {b.customer?.city} · {b.orders} pedidos
+                    </div>
                   </div>
+                  <span className="font-medium tabular">{mxn(b.revenue)}</span>
                 </div>
-                <span className="font-medium tabular">{mxn(b.revenue)}</span>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+              ))}
+              {d.buyers.length === 0 && <p className="text-sm text-muted-foreground">Sin pedidos de mayoreo en el periodo.</p>}
+            </CardContent>
+          </Card>
+        )}
       </div>
     </>
   );
