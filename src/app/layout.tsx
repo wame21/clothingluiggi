@@ -4,6 +4,7 @@ import { ThemeProvider } from "next-themes";
 import { AppShell } from "@/components/app-shell";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { APP_NAME } from "@/lib/constants";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -23,8 +24,8 @@ const display = Cormorant_Garamond({
 });
 
 export const metadata: Metadata = {
-  title: "Luiggi ERP",
-  description: "Panel de control de ventas, inventario, mayoreo y finanzas para Luiggi Boutique.",
+  title: APP_NAME,
+  description: "Panel de control de ventas, inventario y finanzas para boutiques y tiendas de ropa.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

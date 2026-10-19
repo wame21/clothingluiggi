@@ -1,30 +1,52 @@
+"use client";
+
+import { APP_NAME } from "@/lib/constants";
+import { useErp, useBusinessName } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-/** Monograma "LB" inspirado en el logo de Instagram de la marca. */
+/** Iniciales del nombre del negocio (máx. 2 letras). */
+const initialsOf = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w.charAt(0))
+    .join("")
+    .toUpperCase();
+
+/** Logo del negocio o, sin logo, sus iniciales sobre el aro del color de acento. */
 export function BrandMark({ className }: { className?: string }) {
+  const name = useBusinessName();
+  const logoUrl = useErp((s) => s.profileSettings.logoUrl);
   return (
     <div
       className={cn(
-        "relative grid size-9 shrink-0 place-items-center rounded-full bg-[conic-gradient(from_200deg,oklch(0.86_0.1_88),oklch(0.62_0.13_70),oklch(0.9_0.08_92),oklch(0.62_0.13_70),oklch(0.86_0.1_88))] p-[2px]",
+        "relative grid size-9 shrink-0 place-items-center rounded-full bg-[conic-gradient(from_200deg,color-mix(in_oklch,var(--sidebar-primary),white_20%),color-mix(in_oklch,var(--sidebar-primary),black_25%),color-mix(in_oklch,var(--sidebar-primary),white_30%),color-mix(in_oklch,var(--sidebar-primary),black_25%),color-mix(in_oklch,var(--sidebar-primary),white_20%))] p-[2px]",
         className,
       )}
     >
-      <div className="grid size-full place-items-center rounded-full bg-[oklch(0.12_0.005_75)]">
-        <span className="font-display text-[0.95em] font-semibold leading-none tracking-tight text-[oklch(0.95_0.01_85)]">
-          LB
-        </span>
+      <div className="grid size-full place-items-center overflow-hidden rounded-full bg-[oklch(0.12_0.005_75)]">
+        {logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={logoUrl} alt={name} className="size-full object-cover" />
+        ) : (
+          <span className="font-display text-[0.95em] font-semibold leading-none tracking-tight text-[oklch(0.95_0.01_85)]">
+            {initialsOf(name)}
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
-export function BrandLockup({ subtitle = "ERP · Boutique" }: { subtitle?: string }) {
+export function BrandLockup({ subtitle = APP_NAME }: { subtitle?: string }) {
+  const name = useBusinessName();
   return (
     <div className="flex items-center gap-3">
       <BrandMark />
-      <div className="leading-tight">
-        <div className="font-display text-xl font-semibold tracking-[0.18em] gold-text">LUIGGI</div>
-        <div className="text-[10px] uppercase tracking-[0.22em] text-sidebar-foreground/60">{subtitle}</div>
+      <div className="min-w-0 leading-tight">
+        <div className="truncate font-display text-xl font-semibold uppercase tracking-[0.18em] gold-text">{name}</div>
+        <div className="truncate text-[10px] uppercase tracking-[0.22em] text-sidebar-foreground/60">{subtitle}</div>
       </div>
     </div>
   );

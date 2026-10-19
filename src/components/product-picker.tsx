@@ -14,9 +14,8 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { branchName } from "@/lib/constants";
 import { mxn } from "@/lib/format";
-import { useErp } from "@/lib/store";
+import { useBranchName, useErp } from "@/lib/store";
 import type { BranchId, Category, Product } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { productStock, stockOf, variantKey, type QtyMap } from "@/lib/variants";
@@ -34,6 +33,7 @@ export function ProductCombobox({
 }) {
   const products = useErp((s) => s.products);
   const stock = useErp((s) => s.stock);
+  const branchName = useBranchName();
   const [open, setOpen] = useState(false);
   const byCat = new Map<Category, Product[]>();
   for (const p of products.filter((p) => p.active && !exclude.includes(p.id))) {

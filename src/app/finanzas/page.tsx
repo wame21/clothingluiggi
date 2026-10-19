@@ -22,7 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { BRANCHES, branchName, EXPENSE_LABEL, PAYMENT_LABEL } from "@/lib/constants";
+import { EXPENSE_LABEL, PAYMENT_LABEL } from "@/lib/constants";
 import { fDate, fRelative, mxn, pct } from "@/lib/format";
 import {
   breakEven,
@@ -36,7 +36,7 @@ import {
   receivables,
   type Period,
 } from "@/lib/metrics";
-import { errorMessage, useErp } from "@/lib/store";
+import { errorMessage, useActiveBranches, useBranchName, useErp } from "@/lib/store";
 import type { BranchId, ExpenseCategory, PaymentMethod } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -44,6 +44,7 @@ export default function FinanzasPage() {
   const orders = useErp((s) => s.orders);
   const expenses = useErp((s) => s.expenses);
   const removeExpense = useErp((s) => s.removeExpense);
+  const branchName = useBranchName();
   const [period, setPeriod] = useState<Period>("mes");
 
   const d = useMemo(() => {
@@ -286,6 +287,7 @@ export default function FinanzasPage() {
 
 function ExpenseDialog() {
   const addExpense = useErp((s) => s.addExpense);
+  const branches = useActiveBranches();
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({
     description: "",
@@ -357,7 +359,7 @@ function ExpenseDialog() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="general">General</SelectItem>
-                {BRANCHES.map((b) => (
+                {branches.map((b) => (
                   <SelectItem key={b.id} value={b.id}>
                     {b.short}
                   </SelectItem>

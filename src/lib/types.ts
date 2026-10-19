@@ -1,24 +1,32 @@
 export type Channel = "tienda" | "web" | "whatsapp" | "instagram" | "mayoreo";
 
-export type BranchId = "andara" | "bamoa" | "bodega";
+/** Id de sucursal (texto generado por la base de datos). */
+export type BranchId = string;
 
 export interface Branch {
   id: BranchId;
   name: string;
   short: string;
   address: string;
+  /** Vende en mostrador (aparece en Punto de venta). */
+  pos: boolean;
+  /** Surte mayoreo y pedidos en línea; máximo una por negocio. */
+  isWarehouse: boolean;
+  /** Las sucursales no se borran, se archivan. */
+  active: boolean;
+  sort: number;
 }
 
-export type Category =
-  | "Camisas manga larga"
-  | "Camisas manga corta"
-  | "Polos"
-  | "Playeras"
-  | "Pantalones"
-  | "Jeans"
-  | "Shorts"
-  | "Chamarras y suéteres"
-  | "Accesorios";
+export interface Business {
+  id: string;
+  name: string;
+  inviteCode: string;
+  orderPrefix: string;
+  quotePrefix: string;
+}
+
+/** Categoría de producto: la lista sale de `settings.catalog`. */
+export type Category = string;
 
 export interface ProductColor {
   name: string;
@@ -41,7 +49,7 @@ export interface Product {
   wooId?: number;
 }
 
-/** Stock keyed by variant key (`productId|color|size`) then by branch. */
+/** Stock keyed by variant key (`productId|color|size`) then by branch; a missing branch counts as 0. */
 export type StockMap = Record<string, Record<BranchId, number>>;
 
 export type MovementType =
@@ -144,7 +152,8 @@ export interface Customer {
   notes?: string;
 }
 
-export type TierId = "menudeo" | "medio" | "mayoreo" | "distribuidor";
+/** Id de nivel de mayoreo: los niveles los define el negocio en `settings.wholesale`. */
+export type TierId = string;
 
 export type QuoteStatus =
   | "borrador"
@@ -200,10 +209,12 @@ export type AppRole = Role | "pendiente";
 
 export interface Profile {
   id: string;
+  businessId: string;
   name: string;
   email?: string;
   role: AppRole;
-  branch: BranchId;
+  /** Sucursal asignada; `null` si no tiene (p. ej. el dueño). */
+  branch: BranchId | null;
   createdAt: string;
 }
 

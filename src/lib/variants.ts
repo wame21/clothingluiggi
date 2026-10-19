@@ -40,7 +40,7 @@ export const parseVariantKey = (key: string) => {
 export const stockOf = (stock: StockMap, key: string, branch?: BranchId) => {
   const s = stock[key];
   if (!s) return 0;
-  return branch ? s[branch] : s.andara + s.bamoa + s.bodega;
+  return branch ? (s[branch] ?? 0) : Object.values(s).reduce((a, b) => a + b, 0);
 };
 
 export function productStock(p: Product, stock: StockMap, branch?: BranchId) {

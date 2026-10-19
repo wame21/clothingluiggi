@@ -1,4 +1,5 @@
-import { CHANNELS, PAYMENT_FEE } from "./constants";
+import { CHANNELS } from "./constants";
+import { paymentFee } from "./settings";
 import type {
   Channel,
   ErpData,
@@ -83,7 +84,7 @@ export const orderCost = (o: Order) => o.items.reduce((a, it) => a + it.qty * it
 export const orderUnits = (o: Order) => o.items.reduce((a, it) => a + it.qty, 0);
 export const orderPaid = (o: Order) => o.payments.reduce((a, p) => a + p.amount, 0);
 export const orderBalance = (o: Order) => (o.status === "cancelado" ? 0 : Math.max(0, o.total - orderPaid(o)));
-export const orderFees = (o: Order) => o.payments.reduce((a, p) => a + p.amount * PAYMENT_FEE[p.method], 0);
+export const orderFees = (o: Order) => o.payments.reduce((a, p) => a + p.amount * paymentFee(p.method), 0);
 
 export function salesSummary(orders: Order[], r: Range) {
   let sales = 0, shippingIncome = 0, cogs = 0, fees = 0, units = 0, count = 0, discounts = 0, gross = 0;

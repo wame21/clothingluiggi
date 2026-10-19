@@ -36,8 +36,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { branchName } from "@/lib/constants";
-import { useErp } from "@/lib/store";
+import { useBusinessName, useErp, useWholesaleEnabled } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -45,6 +44,7 @@ interface NavItem {
   label: string;
   icon: typeof LayoutDashboard;
   ownerOnly?: boolean;
+  wholesaleOnly?: boolean;
   badge?: "orders" | "quotes";
 }
 
@@ -56,7 +56,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
       { href: "/pedidos", label: "Pedidos", icon: ShoppingBag, badge: "orders" },
       { href: "/pos", label: "Punto de venta", icon: Store },
       { href: "/inventario", label: "Inventario", icon: Boxes },
-      { href: "/mayoreo", label: "Mayoreo", icon: FileText, badge: "quotes" },
+      { href: "/mayoreo", label: "Mayoreo", icon: FileText, badge: "quotes", wholesaleOnly: true },
       { href: "/clientes", label: "Clientes", icon: Users },
     ],
   },
@@ -76,6 +76,62 @@ const OWNER_ONLY = ["/finanzas", "/reportes", "/equipo", "/configuracion"];
 /** Rutas que se muestran sin el menú lateral ni la carga de datos. */
 const BARE_PATHS = ["/login"];
 
+const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+function parseHex(hex: string): [number, number, number] {
+  const h = hex.length === 4 ? [...hex.slice(1)].map((c) => c + c).join("") : hex.slice(1);
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
+}
+
+const toHex = (rgb: number[]) => `#${rgb.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
+
+/** Texto oscuro o claro, el que más contraste dé sobre el color de fondo. */
+function onColor(rgb: number[]) {
+  const [r, g, b] = rgb.map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return lum > 0.179 ? "oklch(0.14 0.006 75)" : "oklch(0.98 0 0)";
+}
+
+const ACCENT_VARS = ["--gold", "--gold-foreground", "--ring", "--sidebar-primary", "--sidebar-primary-foreground", "--sidebar-ring", "--primary", "--primary-foreground"];
+
+/**
+ * Color de acento del negocio sobre el tema dorado. Se escribe en documentElement (gana a :root y .dark):
+ * --gold, --ring y --sidebar-primary toman el color; en claro, --gold se oscurece un poco para leerse sobre
+ * fondo blanco, y en oscuro --primary (botones) también toma el acento, igual que el tema por defecto.
+ * Sin color válido no se escribe nada y queda el tema actual.
+ */
+function AccentTheme() {
+  const accent = useErp((s) => s.profileSettings.accentColor);
+  const { resolvedTheme } = useTheme();
+  const dark = resolvedTheme === "dark";
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const clear = () => ACCENT_VARS.forEach((v) => root.style.removeProperty(v));
+    clear();
+    if (!accent || !HEX.test(accent)) return;
+    const rgb = parseHex(accent);
+    const gold = dark ? toHex(rgb) : toHex(rgb.map((v) => v * 0.82));
+    const set = (name: string, value: string) => root.style.setProperty(name, value);
+    set("--gold", gold);
+    set("--gold-foreground", onColor(dark ? rgb : parseHex(gold)));
+    set("--ring", toHex(rgb));
+    set("--sidebar-primary", toHex(rgb));
+    set("--sidebar-primary-foreground", onColor(rgb));
+    set("--sidebar-ring", toHex(rgb));
+    if (dark) {
+      set("--primary", toHex(rgb));
+      set("--primary-foreground", onColor(rgb));
+    }
+    return clear;
+  }, [accent, dark]);
+
+  return null;
+}
+
 function useNavBadges() {
   const orders = useErp((s) => s.orders);
   const quotes = useErp((s) => s.quotes);
@@ -87,6 +143,7 @@ function useNavBadges() {
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const role = useErp((s) => s.role);
+  const wholesale = useWholesaleEnabled();
   const badges = useNavBadges();
 
   return (
@@ -96,7 +153,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           <div className="px-3 pb-1 text-[10px] font-medium uppercase tracking-[0.2em] text-sidebar-foreground/40">
             {group.section}
           </div>
-          {group.items.map((item) => {
+          {group.items.filter((item) => wholesale || !item.wholesaleOnly).map((item) => {
             const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
             const locked = item.ownerOnly && role !== "dueno";
             const count = item.badge ? badges[item.badge] : 0;
@@ -166,8 +223,10 @@ function ThemeToggle() {
 function UserMenu() {
   const profile = useErp((s) => s.profile);
   const signOut = useErp((s) => s.signOut);
+  const branches = useErp((s) => s.branches);
   if (!profile) return null;
   const owner = profile.role === "dueno";
+  const branch = branches.find((b) => b.id === profile.branch)?.short;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -178,7 +237,7 @@ function UserMenu() {
           <span className="hidden text-left leading-tight sm:block">
             <span className="block text-xs font-medium">{profile.name}</span>
             <span className="block text-[10px] text-muted-foreground">
-              {owner ? "Dueño · acceso total" : `Vendedor · ${branchName(profile.branch)}`}
+              {owner ? "Dueño · acceso total" : branch ? `Vendedor · ${branch}` : "Vendedor"}
             </span>
           </span>
         </Button>
@@ -261,7 +320,7 @@ function DataGate({ children }: { children: ReactNode }) {
         <Hourglass className="size-8 text-gold" />
         <h2 className="text-xl font-semibold">Tu cuenta está pendiente</h2>
         <p className="text-sm text-muted-foreground">
-          Hola {profile.name}. El dueño debe aprobar tu acceso en la sección Equipo. Cuando lo haga, vuelve a revisar.
+          Hola {profile.name}. El dueño del negocio debe aprobar tu acceso en la sección Equipo. Cuando lo haga, vuelve a revisar.
         </p>
         <div className="flex gap-2">
           <Button onClick={() => void init()}>
@@ -281,6 +340,7 @@ function DataGate({ children }: { children: ReactNode }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const role = useErp((s) => s.role);
+  const businessName = useBusinessName();
   const [open, setOpen] = useState(false);
   const locked = role !== "dueno" && OWNER_ONLY.some((p) => pathname.startsWith(p));
 
@@ -288,6 +348,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <DataGate>
+      <AccentTheme />
       <div className="min-h-screen">
         <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-sidebar-border print:hidden lg:block">
           <SidebarBody />
@@ -305,9 +366,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <SidebarBody onNavigate={() => setOpen(false)} />
               </SheetContent>
             </Sheet>
-            <div className="flex items-center gap-2 lg:hidden">
+            <div className="flex min-w-0 items-center gap-2 lg:hidden">
               <BrandMark className="size-7 text-xs" />
-              <span className="font-display text-lg font-semibold tracking-[0.16em]">LUIGGI</span>
+              <span className="truncate font-display text-lg font-semibold uppercase tracking-[0.16em]">{businessName}</span>
             </div>
             <div className="ml-auto flex items-center gap-1.5">
               <ThemeToggle />

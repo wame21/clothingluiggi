@@ -40,7 +40,7 @@ import {
   receivables,
   type Period,
 } from "@/lib/metrics";
-import { useErp, useIsOwner } from "@/lib/store";
+import { useErp, useIsOwner, useWholesaleEnabled } from "@/lib/store";
 import { stockOf, variantKey } from "@/lib/variants";
 
 const DAY = 86_400_000;
@@ -56,7 +56,10 @@ export default function Dashboard() {
   const products = useErp((s) => s.products);
   const stock = useErp((s) => s.stock);
   const quotes = useErp((s) => s.quotes);
+  const userName = useErp((s) => s.profile?.name);
+  const wholesale = useWholesaleEnabled();
   const owner = useIsOwner();
+  const firstName = userName?.trim().split(/\s+/)[0];
   const [period, setPeriod] = useState<Period>("mes");
 
   const d = useMemo(() => {
@@ -104,16 +107,18 @@ export default function Dashboard() {
   return (
     <>
       <PageHeader
-        title={`${greeting()}, Luiggi`}
+        title={firstName ? `${greeting()}, ${firstName}` : greeting()}
         description={<span className="inline-block first-letter:uppercase">{fLongDate(new Date().toISOString())} · así va tu negocio</span>}
         actions={
           <>
             <PeriodSelect value={period} onChange={setPeriod} />
-            <Button asChild variant="outline" className="h-9">
-              <Link href="/mayoreo/nueva">
-                <FileText /> Cotización
-              </Link>
-            </Button>
+            {wholesale && (
+              <Button asChild variant="outline" className="h-9">
+                <Link href="/mayoreo/nueva">
+                  <FileText /> Cotización
+                </Link>
+              </Button>
+            )}
             <Button asChild className="h-9">
               <Link href="/pedidos/nuevo">
                 <Plus /> Nuevo pedido
@@ -254,23 +259,25 @@ export default function Dashboard() {
 
         <Card className="lg:col-span-2 xl:col-span-1">
           <CardHeader>
-            <SectionTitle action={<Link href="/mayoreo" className="text-xs text-muted-foreground hover:text-foreground">Mayoreo</Link>}>
+            <SectionTitle action={wholesale && <Link href="/mayoreo" className="text-xs text-muted-foreground hover:text-foreground">Mayoreo</Link>}>
               Dinero en camino
             </SectionTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className={`grid gap-3 ${wholesale ? "grid-cols-2" : "grid-cols-1"}`}>
               <div className="rounded-lg bg-muted/60 p-3">
                 <div className="text-xs text-muted-foreground">Saldos por cobrar</div>
                 <div className="mt-1 text-lg font-semibold tabular">{mxn(d.ar)}</div>
               </div>
-              <div className="rounded-lg bg-muted/60 p-3">
-                <div className="text-xs text-muted-foreground">Cotizaciones abiertas</div>
-                <div className="mt-1 text-lg font-semibold tabular">{mxn(d.openQuotes.reduce((a, q) => a + q.total, 0))}</div>
-              </div>
+              {wholesale && (
+                <div className="rounded-lg bg-muted/60 p-3">
+                  <div className="text-xs text-muted-foreground">Cotizaciones abiertas</div>
+                  <div className="mt-1 text-lg font-semibold tabular">{mxn(d.openQuotes.reduce((a, q) => a + q.total, 0))}</div>
+                </div>
+              )}
             </div>
             <div className="flex flex-col divide-y">
-              {d.openQuotes.slice(0, 4).map((q) => (
+              {(wholesale ? d.openQuotes : []).slice(0, 4).map((q) => (
                 <Link key={q.id} href={`/mayoreo/${q.id}`} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 hover:opacity-80">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-medium">{q.customerName}</div>

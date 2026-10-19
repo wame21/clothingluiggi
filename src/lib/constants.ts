@@ -1,6 +1,4 @@
 import type {
-  Branch,
-  BranchId,
   Channel,
   CustomerType,
   ExpenseCategory,
@@ -9,41 +7,8 @@ import type {
   QuoteStatus,
 } from "./types";
 
-export const BUSINESS = {
-  name: "Luiggi Boutique",
-  legalName: "Clothing Luiggi",
-  instagram: "@clothingluiggi",
-  web: "luiggiboutique.com",
-  phone: "687 857 6673",
-  email: "luiggiboutique@gmail.com",
-  city: "Guasave, Sinaloa",
-};
-
-export const BRANCHES: Branch[] = [
-  {
-    id: "andara",
-    name: "Sucursal Plaza Andara",
-    short: "Andara",
-    address: "Plaza Andara, Guasave, Sin.",
-  },
-  {
-    id: "bamoa",
-    name: "Sucursal Bamoa",
-    short: "Bamoa",
-    address: "Estación Bamoa, Guasave, Sin.",
-  },
-  {
-    id: "bodega",
-    name: "Bodega / E-commerce",
-    short: "Bodega",
-    address: "Calle Benito Juárez, Guasave, Sin.",
-  },
-];
-
-export const BRANCH_IDS: BranchId[] = ["andara", "bamoa", "bodega"];
-
-export const branchName = (id: BranchId) =>
-  BRANCHES.find((b) => b.id === id)?.short ?? id;
+/** Nombre del producto; la marca de cada negocio sale de su configuración. */
+export const APP_NAME = "Boutique ERP";
 
 /** Fixed order — matches the validated categorical palette in globals.css. */
 export const CHANNELS: Channel[] = ["tienda", "web", "instagram", "whatsapp", "mayoreo"];
@@ -99,15 +64,6 @@ export const PAYMENT_LABEL: Record<PaymentMethod, string> = {
   paypal: "PayPal",
 };
 
-/** Approximate processor fees (incl. IVA) used to estimate real profit. */
-export const PAYMENT_FEE: Record<PaymentMethod, number> = {
-  efectivo: 0,
-  transferencia: 0,
-  tarjeta: 0.036,
-  mercadopago: 0.0406,
-  paypal: 0.0458,
-};
-
 export const EXPENSE_LABEL: Record<ExpenseCategory, string> = {
   renta: "Renta de locales",
   nomina: "Nómina",
@@ -124,5 +80,3 @@ export const CUSTOMER_TYPE_LABEL: Record<CustomerType, string> = {
   mayorista: "Mayorista",
   distribuidor: "Distribuidor",
 };
-
-export const CARRIERS = ["Estafeta", "FedEx", "DHL", "Paquetexpress", "J&T"];

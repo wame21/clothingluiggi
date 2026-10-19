@@ -12,13 +12,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { fDate, mxn, num, pct } from "@/lib/format";
 import { inRange, periodRange, salesSummary } from "@/lib/metrics";
-import { useErp, useIsOwner } from "@/lib/store";
+import { useErp, useIsOwner, useWholesaleEnabled } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { PACKAGES, TIERS, tierById, tierPrice, WHOLESALE_TERMS } from "@/lib/wholesale";
+import { tierPrice, WHOLESALE_TERMS } from "@/lib/wholesale";
+import { WholesaleDisabled } from "./_comunes";
 
 const DAY = 86_400_000;
 
 export default function MayoreoPage() {
+  return useWholesaleEnabled() ? <Mayoreo /> : <WholesaleDisabled />;
+}
+
+function Mayoreo() {
+  const wholesale = useErp((s) => s.wholesale);
+  const tiers = useMemo(() => [...wholesale.tiers].sort((a, b) => a.minPieces - b.minPieces), [wholesale.tiers]);
+  const packages = wholesale.packages;
   const quotes = useErp((s) => s.quotes);
   const orders = useErp((s) => s.orders);
   const products = useErp((s) => s.products);
@@ -47,7 +55,7 @@ export default function MayoreoPage() {
   }, [quotes, orders, customers, now]);
 
   const sorted = [...quotes].sort((a, b) => b.date.localeCompare(a.date));
-  const showcase = products.filter((p) => p.category !== "Accesorios").slice(0, 8);
+  const showcase = products.filter((p) => p.active).slice(0, 8);
 
   return (
     <>
@@ -107,7 +115,7 @@ export default function MayoreoPage() {
                       <TableCell className="max-w-60 truncate">{q.customerName}</TableCell>
                       <TableCell className="text-right tabular">{q.items.reduce((a, it) => a + it.qty, 0)}</TableCell>
                       <TableCell>
-                        <span className="text-xs">{tierById(q.tierId).name}</span>
+                        <span className="text-xs">{tiers.find((t) => t.id === q.tierId)?.name ?? q.tierId}</span>
                       </TableCell>
                       <TableCell className="text-right font-medium tabular">{mxn(q.total)}</TableCell>
                       <TableCell className={cn("text-xs", expired ? "text-destructive" : "text-muted-foreground")}>
@@ -126,8 +134,8 @@ export default function MayoreoPage() {
 
         <TabsContent value="esquema" className="flex flex-col gap-4">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {TIERS.map((t) => (
-              <Card key={t.id} className={cn("gap-1 px-4 py-4", t.id === "mayoreo" && "ring-gold/50")}>
+            {tiers.map((t) => (
+              <Card key={t.id} className="gap-1 px-4 py-4">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-semibold">{t.name}</span>
                   {t.discount > 0 && (
@@ -154,7 +162,7 @@ export default function MayoreoPage() {
                 <thead>
                   <tr className="border-y bg-muted/40 text-left text-xs text-muted-foreground">
                     <th className="px-4 py-2 font-medium">Producto</th>
-                    {TIERS.map((t) => (
+                    {tiers.map((t) => (
                       <th key={t.id} className="py-2 pr-4 text-right font-medium">
                         {t.name}
                       </th>
@@ -168,7 +176,7 @@ export default function MayoreoPage() {
                         <div className="font-medium">{p.name}</div>
                         {owner && <div className="text-xs text-muted-foreground">Costo {mxn(p.cost)}</div>}
                       </td>
-                      {TIERS.map((t) => {
+                      {tiers.map((t) => {
                         const price = tierPrice(p.price, t);
                         return (
                           <td key={t.id} className="py-2.5 pr-4 text-right tabular">
@@ -184,8 +192,20 @@ export default function MayoreoPage() {
             </div>
           </Card>
 
+          {packages.length === 0 && owner && (
+            <Card className="gap-1 px-4 py-4">
+              <span className="text-sm font-semibold">Paquetes de mayoreo</span>
+              <p className="text-xs text-muted-foreground">
+                Define paquetes con una mezcla de categorías para armar cotizaciones con un clic.{" "}
+                <Link href="/configuracion" className="text-gold underline-offset-4 hover:underline">
+                  Configurar paquetes
+                </Link>
+              </p>
+            </Card>
+          )}
+
           <div className="grid gap-3 lg:grid-cols-3">
-            {PACKAGES.map((pkg) => (
+            {packages.map((pkg) => (
               <Card key={pkg.id} className="gap-2 px-4 py-4">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold">{pkg.name}</span>
@@ -221,8 +241,14 @@ export default function MayoreoPage() {
                 ))}
               </ul>
               <p className="mt-4 text-xs text-muted-foreground">
-                Anticipo: {num(WHOLESALE_TERMS.depositPct * 100)}% · Envío gratis desde {mxn(WHOLESALE_TERMS.freeShippingFrom)} · Vigencia{" "}
-                {WHOLESALE_TERMS.validityDays} días.{" "}
+                {[
+                  wholesale.depositPct > 0 && `Anticipo: ${num(wholesale.depositPct * 100)}%`,
+                  wholesale.freeShippingFrom > 0 && `Envío gratis desde ${mxn(wholesale.freeShippingFrom)}`,
+                  wholesale.validityDays > 0 && `Vigencia ${wholesale.validityDays} días`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                {" "}
                 {owner && (
                   <Link href="/configuracion" className="text-gold underline-offset-4 hover:underline">
                     Cambiar en Configuración

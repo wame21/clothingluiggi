@@ -12,6 +12,7 @@ import {
   SlidersHorizontal,
   Tag,
 } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -35,10 +36,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BRANCHES, branchName } from "@/lib/constants";
 import { fDateTime, mxn, num, pct } from "@/lib/format";
 import { inventoryValue, replenishment } from "@/lib/metrics";
-import { errorMessage, useErp, useIsOwner } from "@/lib/store";
+import { errorMessage, useActiveBranches, useBranchName, useErp, useIsOwner, useWarehouse } from "@/lib/store";
 import type { BranchId, Category, MovementType, Product, StockMap } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { productStock, stockOf, variantKey, type QtyMap } from "@/lib/variants";
@@ -83,6 +83,8 @@ function Inventario() {
   const orders = useErp((s) => s.orders);
   const movements = useErp((s) => s.movements);
   const owner = useIsOwner();
+  const branches = useActiveBranches();
+  const branchName = useBranchName();
 
   const [tab, setTab] = useState(params.get("tab") ?? "existencias");
   const [q, setQ] = useState("");
@@ -93,7 +95,7 @@ function Inventario() {
 
   const value = useMemo(() => inventoryValue(products, stock), [products, stock]);
   const repl = useMemo(() => replenishment(products, stock, orders), [products, stock, orders]);
-  const outVariants = useMemo(() => Object.values(stock).filter((s) => s.andara + s.bamoa + s.bodega === 0).length, [stock]);
+  const outVariants = useMemo(() => Object.keys(stock).filter((k) => stockOf(stock, k) === 0).length, [stock]);
 
   const categories = [...new Set(products.map((p) => p.category))];
   const rows = products
@@ -114,7 +116,7 @@ function Inventario() {
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label="Piezas en existencia" value={num(value.units)} hint={<span>{products.length} modelos · 3 ubicaciones</span>} icon={Boxes} />
+        <KpiCard label="Piezas en existencia" value={num(value.units)} hint={<span>{products.length} modelos · {branches.length} {branches.length === 1 ? "sucursal" : "sucursales"}</span>} icon={Boxes} />
         {owner ? (
           <>
             <KpiCard label="Inventario a costo" value={mxn(value.cost)} hint="dinero invertido en mercancía" icon={CircleDollarSign} accent />
@@ -167,7 +169,7 @@ function Inventario() {
                   {owner && <TableHead className="text-right">Costo</TableHead>}
                   <TableHead className="text-right">Precio</TableHead>
                   {owner && <TableHead className="text-right">Margen</TableHead>}
-                  {BRANCHES.map((b) => (
+                  {branches.map((b) => (
                     <TableHead key={b.id} className="text-right">
                       {b.short}
                     </TableHead>
@@ -199,7 +201,7 @@ function Inventario() {
                       {owner && <TableCell className="text-right text-muted-foreground tabular">{mxn(p.cost)}</TableCell>}
                       <TableCell className="text-right tabular">{mxn(p.price)}</TableCell>
                       {owner && <TableCell className="text-right tabular">{pct((p.price - p.cost) / p.price, 0)}</TableCell>}
-                      {BRANCHES.map((b) => (
+                      {branches.map((b) => (
                         <TableCell key={b.id} className="text-right tabular">
                           {productStock(p, stock, b.id)}
                         </TableCell>
@@ -320,7 +322,7 @@ function Inventario() {
                   <TableHead>Tipo</TableHead>
                   <TableHead>Producto</TableHead>
                   <TableHead>Variante</TableHead>
-                  <TableHead>Ubicación</TableHead>
+                  <TableHead>Sucursal</TableHead>
                   <TableHead className="text-right">Cantidad</TableHead>
                   <TableHead className="pr-4">Referencia</TableHead>
                 </TableRow>
@@ -375,6 +377,8 @@ function ProductSheet({ product }: { product: Product }) {
   const movements = useErp((s) => s.movements);
   const updateProduct = useErp((s) => s.updateProduct);
   const owner = useIsOwner();
+  const branches = useActiveBranches();
+  const branchName = useBranchName();
   const [view, setView] = useState<BranchId | "all">("all");
   const [price, setPrice] = useState(product.price);
   const [cost, setCost] = useState(product.cost);
@@ -403,7 +407,7 @@ function ProductSheet({ product }: { product: Product }) {
                 <TabsTrigger value="all" className="text-xs">
                   Total
                 </TabsTrigger>
-                {BRANCHES.map((b) => (
+                {branches.map((b) => (
                   <TabsTrigger key={b.id} value={b.id} className="text-xs">
                     {b.short}
                   </TabsTrigger>
@@ -524,16 +528,19 @@ function ProductSheet({ product }: { product: Product }) {
 /* ------------------------------------------------------------------ */
 const MOVE_META = {
   entrada: { label: "Entrada de mercancía", icon: PackagePlus, desc: "Registra lo que llegó del proveedor, por color y talla." },
-  traspaso: { label: "Traspaso", icon: ArrowLeftRight, desc: "Mueve piezas entre bodega y sucursales." },
+  traspaso: { label: "Traspaso", icon: ArrowLeftRight, desc: "Mueve piezas entre sucursales." },
   ajuste: { label: "Ajuste", icon: SlidersHorizontal, desc: "Corrige por conteo físico, merma o prenda dañada." },
 };
 
 function StockMoveDialog({ product, kind }: { product: Product; kind: "entrada" | "traspaso" | "ajuste" }) {
   const moveStock = useErp((s) => s.moveStock);
   const transferStock = useErp((s) => s.transferStock);
+  const branches = useActiveBranches();
+  const warehouse = useWarehouse();
+  const branchName = useBranchName();
   const [open, setOpen] = useState(false);
-  const [branch, setBranch] = useState<BranchId>(kind === "ajuste" ? "andara" : "bodega");
-  const [to, setTo] = useState<BranchId>("andara");
+  const [branch, setBranch] = useState<BranchId>((warehouse ?? branches[0])?.id ?? "");
+  const [to, setTo] = useState<BranchId>(branches.find((b) => b.id !== (warehouse ?? branches[0])?.id)?.id ?? "");
   const [qty, setQty] = useState<QtyMap>({});
   const [ref, setRef] = useState("");
   const [sign, setSign] = useState<1 | -1>(-1);
@@ -547,7 +554,7 @@ function StockMoveDialog({ product, kind }: { product: Product; kind: "entrada" 
       .filter(([, v]) => v > 0)
       .map(([key, v]) => ({ variantKey: key, qty: v }));
     if (!entries.length) return toast.error("Captura al menos una pieza");
-    if (kind === "traspaso" && branch === to) return toast.error("Elige ubicaciones distintas");
+    if (kind === "traspaso" && branch === to) return toast.error("Elige sucursales distintas");
     setSaving(true);
     try {
       if (kind === "entrada") {
@@ -578,7 +585,7 @@ function StockMoveDialog({ product, kind }: { product: Product; kind: "entrada" 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant={kind === "entrada" ? "default" : "outline"} size="sm">
+        <Button variant={kind === "entrada" ? "default" : "outline"} size="sm" disabled={kind === "traspaso" && branches.length < 2}>
           <Icon /> {meta.label}
         </Button>
       </DialogTrigger>
@@ -592,11 +599,12 @@ function StockMoveDialog({ product, kind }: { product: Product; kind: "entrada" 
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-end gap-3">
             <div className="grid gap-1.5">
-              <Label className="text-xs">{kind === "traspaso" ? "Desde" : "Ubicación"}</Label>
+              <Label className="text-xs">{kind === "traspaso" ? "Desde" : "Sucursal"}</Label>
               <Select
                 value={branch}
                 onValueChange={(v) => {
                   setBranch(v as BranchId);
+                  if (v === to) setTo(branches.find((b) => b.id !== v)?.id ?? "");
                   setQty({});
                 }}
               >
@@ -604,7 +612,7 @@ function StockMoveDialog({ product, kind }: { product: Product; kind: "entrada" 
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {BRANCHES.map((b) => (
+                  {branches.map((b) => (
                     <SelectItem key={b.id} value={b.id}>
                       {b.name}
                     </SelectItem>
@@ -620,11 +628,13 @@ function StockMoveDialog({ product, kind }: { product: Product; kind: "entrada" 
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {BRANCHES.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.name}
-                      </SelectItem>
-                    ))}
+                    {branches
+                      .filter((b) => b.id !== branch)
+                      .map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -666,46 +676,47 @@ function StockMoveDialog({ product, kind }: { product: Product; kind: "entrada" 
 /* ------------------------------------------------------------------ */
 /* Alta de producto                                                     */
 /* ------------------------------------------------------------------ */
-const SIZE_PRESETS: Record<string, string[]> = {
-  "Superior S–XL": ["S", "M", "L", "XL"],
-  "Superior S–XXL": ["S", "M", "L", "XL", "XXL"],
-  "Pantalón 28–36": ["28", "30", "32", "34", "36"],
-  "Talla única": ["Única"],
+const nextSku = (taken: string[]) => {
+  let n = taken.length + 1;
+  while (taken.includes(`SKU-${String(n).padStart(4, "0")}`)) n++;
+  return `SKU-${String(n).padStart(4, "0")}`;
 };
-const CATEGORIES: Category[] = [
-  "Camisas manga larga",
-  "Camisas manga corta",
-  "Polos",
-  "Playeras",
-  "Pantalones",
-  "Jeans",
-  "Shorts",
-  "Chamarras y suéteres",
-  "Accesorios",
-];
 
 function NewProductDialog({ onCreated }: { onCreated: (id: string) => void }) {
   const addProduct = useErp((s) => s.addProduct);
-  const count = useErp((s) => s.products.length);
+  const products = useErp((s) => s.products);
+  const catalog = useErp((s) => s.catalog);
+  const businessName = useErp((s) => s.business?.name ?? "");
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ name: "", brand: "Luiggi", category: "Polos" as Category, cost: 0, price: 0, preset: "Superior S–XL", colors: "Negro, Blanco" });
+  const [f, setF] = useState({
+    name: "",
+    brand: businessName,
+    category: catalog.categories[0] ?? "",
+    cost: 0,
+    price: 0,
+    preset: catalog.sizePresets[0]?.name ?? "",
+    colors: "Negro, Blanco",
+  });
+  const sizes = catalog.sizePresets.find((p) => p.name === f.preset)?.sizes ?? [];
+  const missingSetup = catalog.categories.length === 0 || catalog.sizePresets.length === 0;
   const colorList = f.colors.split(",").map((c) => c.trim()).filter(Boolean);
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
     if (!f.name.trim() || f.price <= 0) return toast.error("Nombre y precio son obligatorios");
+    if (!f.category || !sizes.length) return toast.error("Elige categoría y tallas");
     const palette = ["#111111", "#f4f4f2", "#1c2a44", "#5e1a26", "#cbb89a", "#56603a", "#8a8a8a"];
     setSaving(true);
     let p: Product;
     try {
       p = await addProduct({
-      sku: `LB-NEW-${String(count + 1).padStart(3, "0")}`,
+      sku: nextSku(products.map((x) => x.sku)),
       name: f.name.trim(),
       brand: f.brand.trim(),
       category: f.category,
       cost: f.cost,
       price: f.price,
-      sizes: SIZE_PRESETS[f.preset],
+      sizes,
       colors: colorList.map((name, i) => ({ name, hex: palette[i % palette.length] })),
       minStock: 2,
       active: true,
@@ -732,10 +743,19 @@ function NewProductDialog({ onCreated }: { onCreated: (id: string) => void }) {
           <DialogTitle>Nuevo producto</DialogTitle>
           <DialogDescription>Se crean automáticamente todas sus variantes de color y talla.</DialogDescription>
         </DialogHeader>
+        {missingSetup && (
+          <p className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+            Faltan categorías o juegos de tallas. Defínelos en{" "}
+            <Link href="/configuracion" className="font-medium underline underline-offset-2">
+              Configuración
+            </Link>{" "}
+            para poder dar de alta productos.
+          </p>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="grid gap-1.5 sm:col-span-2">
             <Label>Nombre</Label>
-            <Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Ej. Polo Pavini Silver" />
+            <Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Ej. Blusa de lino manga corta" />
           </div>
           <div className="grid gap-1.5">
             <Label>Marca</Label>
@@ -743,12 +763,12 @@ function NewProductDialog({ onCreated }: { onCreated: (id: string) => void }) {
           </div>
           <div className="grid gap-1.5">
             <Label>Categoría</Label>
-            <Select value={f.category} onValueChange={(v) => setF({ ...f, category: v as Category })}>
+            <Select value={f.category} onValueChange={(v) => setF({ ...f, category: v })}>
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {CATEGORIES.map((c) => (
+                {catalog.categories.map((c) => (
                   <SelectItem key={c} value={c}>
                     {c}
                   </SelectItem>
@@ -771,9 +791,9 @@ function NewProductDialog({ onCreated }: { onCreated: (id: string) => void }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {Object.keys(SIZE_PRESETS).map((k) => (
-                  <SelectItem key={k} value={k}>
-                    {k}
+                {catalog.sizePresets.map(({ name }) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -785,12 +805,12 @@ function NewProductDialog({ onCreated }: { onCreated: (id: string) => void }) {
           </div>
           {f.price > 0 && f.cost > 0 && (
             <p className="text-xs text-muted-foreground sm:col-span-2">
-              Margen de {pct((f.price - f.cost) / f.price)} · {SIZE_PRESETS[f.preset].length * colorList.length} variantes
+              Margen de {pct((f.price - f.cost) / f.price)} · {sizes.length * colorList.length} variantes
             </p>
           )}
         </div>
         <DialogFooter>
-          <Button disabled={saving} onClick={() => void submit()}>Crear producto</Button>
+          <Button disabled={saving || missingSetup} onClick={() => void submit()}>Crear producto</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

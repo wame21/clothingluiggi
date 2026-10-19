@@ -1,6 +1,6 @@
+import { currentCatalog } from "./settings";
 import type {
   BranchId,
-  Category,
   CustomerType,
   Product,
   StockMap,
@@ -9,10 +9,10 @@ import type {
 import { variantKey } from "./variants";
 
 /**
- * Esquema de mayoreo de Luiggi Boutique. El nivel se determina por el total de
- * piezas del pedido (se pueden mezclar modelos, colores y tallas). Los valores
- * vienen de `settings.wholesale` en Supabase; estos son los mismos que siembra la
- * migración y solo se usan mientras cargan.
+ * Esquema de mayoreo del negocio. El nivel se determina por el total de piezas del
+ * pedido (se pueden mezclar modelos, colores y tallas). Los valores vienen de
+ * `settings.wholesale` en Supabase; los de `DEFAULT_WHOLESALE` solo se usan mientras
+ * cargan o si el negocio aún no guarda nada.
  */
 export interface Tier {
   id: TierId;
@@ -22,21 +22,140 @@ export interface Tier {
   description: string;
 }
 
-export const TIERS: Tier[] = [
-  { id: "menudeo", name: "Menudeo", minPieces: 1, discount: 0, description: "Precio de lista" },
-  { id: "medio", name: "Medio mayoreo", minPieces: 6, discount: 0.12, description: "6 a 9 piezas surtidas" },
-  { id: "mayoreo", name: "Mayoreo", minPieces: 10, discount: 0.22, description: "10 a 49 piezas surtidas (paquetes de 10, 20 y 30)" },
-  { id: "distribuidor", name: "Distribuidor", minPieces: 50, discount: 0.28, description: "50+ piezas o clientes distribuidores desde 30" },
-];
+export interface WholesalePackage {
+  id: string;
+  name: string;
+  pieces: number;
+  description: string;
+  mix: { category: string; qty: number }[];
+}
 
-export let DISTRIBUTOR_CUSTOMER_MIN = 30;
+/** Forma de `settings.wholesale` en Supabase. */
+export interface WholesaleSettings {
+  enabled: boolean;
+  tiers: Tier[];
+  /** Piezas desde las que un cliente distribuidor recibe el último nivel; 0 = sin regla especial. */
+  distributorCustomerMin: number;
+  depositPct: number;
+  /** 0 = sin envío gratis. */
+  freeShippingFrom: number;
+  flatShipping: number;
+  validityDays: number;
+  packages: WholesalePackage[];
+  bank: { bank: string; holder: string; clabe: string };
+}
 
-export const tierById = (id: TierId) => TIERS.find((t) => t.id === id)!;
+export const DEFAULT_WHOLESALE: WholesaleSettings = {
+  enabled: false,
+  tiers: [{ id: "lista", name: "Precio de lista", minPieces: 1, discount: 0, description: "Precio de lista" }],
+  distributorCustomerMin: 0,
+  depositPct: 0,
+  freeShippingFrom: 0,
+  flatShipping: 0,
+  validityDays: 7,
+  packages: [],
+  bank: { bank: "", holder: "", clabe: "" },
+};
+
+const clone = <T>(v: T): T => structuredClone(v);
+
+/** Valor guardado en `settings.wholesale` + valores por defecto para lo que falte. */
+export function wholesaleFrom(v: Partial<WholesaleSettings> | null | undefined): WholesaleSettings {
+  const d = clone(DEFAULT_WHOLESALE);
+  return {
+    ...d,
+    ...v,
+    tiers: v?.tiers?.length ? v.tiers : d.tiers,
+    packages: Array.isArray(v?.packages) ? v.packages : d.packages,
+    bank: { ...d.bank, ...v?.bank },
+  };
+}
+
+const mxn0 = (n: number) => `$${n.toLocaleString("es-MX")}`;
+
+type Terms = Pick<WholesaleSettings, "depositPct" | "freeShippingFrom" | "flatShipping" | "validityDays">;
+
+/** Condiciones para cotizaciones; omite las frases que no aplican (anticipo, envío o vigencia en 0). */
+function conditions(t: Terms) {
+  const out = ["Precios en MXN, sujetos a disponibilidad de inventario."];
+  if (t.depositPct > 0)
+    out.push(`Se aparta con ${Math.round(t.depositPct * 100)}% de anticipo; el resto se liquida antes del envío.`);
+  if (t.flatShipping > 0)
+    out.push(
+      t.freeShippingFrom > 0
+        ? `Envío gratis en pedidos mayoristas desde ${mxn0(t.freeShippingFrom)}; si no, tarifa fija de ${mxn0(t.flatShipping)} por paquete.`
+        : `Envío con tarifa fija de ${mxn0(t.flatShipping)} por paquete.`,
+    );
+  out.push("Se pueden mezclar modelos, colores y tallas para alcanzar el nivel de precio.");
+  if (t.validityDays > 0) out.push(`Vigencia de la cotización: ${t.validityDays} días naturales.`);
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Configuración vigente fuera de React                                 */
+/* ------------------------------------------------------------------ */
+// Estado de módulo aplicado por el store al cargar y al guardar, para que los helpers
+// que no son hooks (tierFor, shippingFor, expandPackage…) lean siempre lo vigente.
+let enabled = DEFAULT_WHOLESALE.enabled;
+
+export const TIERS: Tier[] = clone(DEFAULT_WHOLESALE.tiers);
+
+export let DISTRIBUTOR_CUSTOMER_MIN = DEFAULT_WHOLESALE.distributorCustomerMin;
+
+export const PACKAGES: WholesalePackage[] = [];
+
+export const WHOLESALE_TERMS = {
+  depositPct: DEFAULT_WHOLESALE.depositPct,
+  freeShippingFrom: DEFAULT_WHOLESALE.freeShippingFrom,
+  flatShipping: DEFAULT_WHOLESALE.flatShipping,
+  validityDays: DEFAULT_WHOLESALE.validityDays,
+  conditions: conditions(DEFAULT_WHOLESALE),
+  bank: { ...DEFAULT_WHOLESALE.bank },
+};
+
+export const isWholesaleEnabled = () => enabled;
+
+/** Copia de la configuración vigente, con la forma en que se guarda en `settings.wholesale`. */
+export const wholesaleSnapshot = (): WholesaleSettings => ({
+  enabled,
+  tiers: TIERS.map((t) => ({ ...t })),
+  distributorCustomerMin: DISTRIBUTOR_CUSTOMER_MIN,
+  depositPct: WHOLESALE_TERMS.depositPct,
+  freeShippingFrom: WHOLESALE_TERMS.freeShippingFrom,
+  flatShipping: WHOLESALE_TERMS.flatShipping,
+  validityDays: WHOLESALE_TERMS.validityDays,
+  packages: clone(PACKAGES),
+  bank: { ...WHOLESALE_TERMS.bank },
+});
+
+/** Aplica la configuración guardada; se llama al cargar los datos, antes del primer render. */
+export function applyWholesaleSettings(s: WholesaleSettings) {
+  const next = wholesaleFrom(s);
+  enabled = next.enabled;
+  TIERS.splice(0, TIERS.length, ...[...next.tiers].sort((a, b) => a.minPieces - b.minPieces));
+  DISTRIBUTOR_CUSTOMER_MIN = next.distributorCustomerMin;
+  PACKAGES.splice(0, PACKAGES.length, ...next.packages);
+  Object.assign(WHOLESALE_TERMS, {
+    depositPct: next.depositPct,
+    freeShippingFrom: next.freeShippingFrom,
+    flatShipping: next.flatShipping,
+    validityDays: next.validityDays,
+    bank: next.bank,
+  });
+  WHOLESALE_TERMS.conditions = conditions(WHOLESALE_TERMS);
+}
+
+/* ------------------------------------------------------------------ */
+/* Niveles y precios                                                    */
+/* ------------------------------------------------------------------ */
+export const tierById = (id: TierId) => TIERS.find((t) => t.id === id) ?? TIERS[0];
+
+/** El cliente distribuidor con suficientes piezas recibe el último nivel (el de mayor descuento). */
+const distributorRule = (pieces: number, customerType?: CustomerType) =>
+  DISTRIBUTOR_CUSTOMER_MIN > 0 && customerType === "distribuidor" && pieces >= DISTRIBUTOR_CUSTOMER_MIN;
 
 export function tierFor(pieces: number, customerType?: CustomerType): Tier {
-  if (customerType === "distribuidor" && pieces >= DISTRIBUTOR_CUSTOMER_MIN) {
-    return tierById("distribuidor");
-  }
+  if (distributorRule(pieces, customerType)) return TIERS[TIERS.length - 1];
   let current = TIERS[0];
   for (const t of TIERS) if (pieces >= t.minPieces) current = t;
   return current;
@@ -49,8 +168,8 @@ export function nextTier(pieces: number, customerType?: CustomerType) {
   const next = TIERS[idx + 1];
   if (!next) return null;
   const min =
-    next.id === "distribuidor" && customerType === "distribuidor"
-      ? DISTRIBUTOR_CUSTOMER_MIN
+    idx + 1 === TIERS.length - 1 && DISTRIBUTOR_CUSTOMER_MIN > 0 && customerType === "distribuidor"
+      ? Math.min(next.minPieces, DISTRIBUTOR_CUSTOMER_MIN)
       : next.minPieces;
   return { tier: next, missing: Math.max(0, min - pieces) };
 }
@@ -59,81 +178,34 @@ export function nextTier(pieces: number, customerType?: CustomerType) {
 export const tierPrice = (listPrice: number, tier: Tier) =>
   Math.round((listPrice * (1 - tier.discount)) / 5) * 5;
 
-const mxn0 = (n: number) => `$${n.toLocaleString("es-MX")}`;
-
-function conditions(t: { depositPct: number; freeShippingFrom: number; flatShipping: number; validityDays: number }) {
-  return [
-    "Precios en MXN, sujetos a disponibilidad de inventario.",
-    `Se aparta con ${Math.round(t.depositPct * 100)}% de anticipo; el resto se liquida antes del envío.`,
-    `Envío gratis en pedidos mayoristas desde ${mxn0(t.freeShippingFrom)}; si no, tarifa fija de ${mxn0(t.flatShipping)} por paquete.`,
-    "Se pueden mezclar modelos, colores y tallas para alcanzar el nivel de precio.",
-    "Cambios únicamente por defecto de fábrica dentro de los 5 días posteriores a la entrega.",
-    `Vigencia de la cotización: ${t.validityDays} días naturales.`,
-  ];
-}
-
-export const WHOLESALE_TERMS = {
-  depositPct: 0.5,
-  freeShippingFrom: 15000,
-  flatShipping: 280,
-  validityDays: 7,
-  conditions: conditions({ depositPct: 0.5, freeShippingFrom: 15000, flatShipping: 280, validityDays: 7 }),
-  bank: { bank: "", holder: "Luiggi Boutique", clabe: "" },
-};
-
-/** Forma de `settings.wholesale` en Supabase. */
-export interface WholesaleSettings {
-  tiers: Tier[];
-  distributorCustomerMin: number;
-  depositPct: number;
-  freeShippingFrom: number;
-  flatShipping: number;
-  validityDays: number;
-  bank: { bank: string; holder: string; clabe: string };
-}
-
-/** Copia de la configuración vigente, con la forma en que se guarda en `settings.wholesale`. */
-export const wholesaleSnapshot = (): WholesaleSettings => ({
-  tiers: TIERS.map((t) => ({ ...t })),
-  distributorCustomerMin: DISTRIBUTOR_CUSTOMER_MIN,
-  depositPct: WHOLESALE_TERMS.depositPct,
-  freeShippingFrom: WHOLESALE_TERMS.freeShippingFrom,
-  flatShipping: WHOLESALE_TERMS.flatShipping,
-  validityDays: WHOLESALE_TERMS.validityDays,
-  bank: { ...WHOLESALE_TERMS.bank },
-});
-
-/** Aplica la configuración guardada; se llama al cargar los datos, antes del primer render. */
-export function applyWholesaleSettings(s: WholesaleSettings) {
-  if (s.tiers?.length) TIERS.splice(0, TIERS.length, ...[...s.tiers].sort((a, b) => a.minPieces - b.minPieces));
-  DISTRIBUTOR_CUSTOMER_MIN = s.distributorCustomerMin ?? DISTRIBUTOR_CUSTOMER_MIN;
-  Object.assign(WHOLESALE_TERMS, {
-    depositPct: s.depositPct,
-    freeShippingFrom: s.freeShippingFrom,
-    flatShipping: s.flatShipping,
-    validityDays: s.validityDays,
-    bank: { ...WHOLESALE_TERMS.bank, ...s.bank },
-  });
-  WHOLESALE_TERMS.conditions = conditions(WHOLESALE_TERMS);
-}
-
+/** Envío de un pedido mayorista: sin tarifa o sobre el mínimo de envío gratis, no se cobra. */
 export const shippingFor = (subtotal: number) =>
-  subtotal >= WHOLESALE_TERMS.freeShippingFrom || subtotal === 0
+  subtotal === 0 ||
+  WHOLESALE_TERMS.flatShipping === 0 ||
+  (WHOLESALE_TERMS.freeShippingFrom > 0 && subtotal >= WHOLESALE_TERMS.freeShippingFrom)
     ? 0
     : WHOLESALE_TERMS.flatShipping;
 
-/** Size curve used to split wholesale packages. */
-const TOP_CURVE: Record<string, number> = { S: 0.15, M: 0.35, L: 0.35, XL: 0.15, XXL: 0 };
-const BOTTOM_CURVE: Record<string, number> = { "28": 0.1, "30": 0.25, "32": 0.3, "34": 0.25, "36": 0.1 };
-
+/* ------------------------------------------------------------------ */
+/* Paquetes y curva de tallas                                           */
+/* ------------------------------------------------------------------ */
+/**
+ * Proporción de cada talla según `catalog.sizeCurve`. Las tallas que la curva no
+ * menciona toman el peso promedio de las que sí; sin curva el reparto es parejo.
+ */
 export function sizeCurve(sizes: string[]): Record<string, number> {
-  const base = sizes.map((s) => TOP_CURVE[s] ?? BOTTOM_CURVE[s] ?? 1);
+  const curve = currentCatalog().sizeCurve;
+  const weight = (s: string) => (typeof curve[s] === "number" && curve[s] >= 0 ? curve[s] : undefined);
+  const known = sizes.map(weight).filter((w): w is number => w !== undefined);
+  const fallback = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 1;
+  const base = sizes.map((s) => weight(s) ?? fallback);
   const total = base.reduce((a, b) => a + b, 0) || 1;
   return Object.fromEntries(sizes.map((s, i) => [s, base[i] / total]));
 }
 
 /** Largest-remainder split of `qty` across sizes following the curve. */
 export function distributeBySize(sizes: string[], qty: number) {
+  if (sizes.length === 0) return {};
   const curve = sizeCurve(sizes);
   const raw = sizes.map((s) => ({ s, v: curve[s] * qty }));
   const out: Record<string, number> = Object.fromEntries(
@@ -148,51 +220,6 @@ export function distributeBySize(sizes: string[], qty: number) {
   }
   return out;
 }
-
-export interface WholesalePackage {
-  id: string;
-  name: string;
-  pieces: number;
-  description: string;
-  mix: { category: Category; qty: number }[];
-}
-
-export const PACKAGES: WholesalePackage[] = [
-  {
-    id: "arranque",
-    name: "Paquete Arranque",
-    pieces: 12,
-    description: "Para quien empieza a revender: polos y camisas, curva de tallas completa.",
-    mix: [
-      { category: "Polos", qty: 6 },
-      { category: "Camisas manga larga", qty: 6 },
-    ],
-  },
-  {
-    id: "boutique",
-    name: "Paquete Boutique",
-    pieces: 24,
-    description: "Surtido para aparador: polos, camisas y pantalones.",
-    mix: [
-      { category: "Polos", qty: 8 },
-      { category: "Camisas manga larga", qty: 8 },
-      { category: "Pantalones", qty: 8 },
-    ],
-  },
-  {
-    id: "distribuidor",
-    name: "Paquete Distribuidor",
-    pieces: 50,
-    description: "Volumen para tiendas establecidas, con precio de distribuidor.",
-    mix: [
-      { category: "Polos", qty: 15 },
-      { category: "Camisas manga larga", qty: 10 },
-      { category: "Camisas manga corta", qty: 10 },
-      { category: "Jeans", qty: 10 },
-      { category: "Playeras", qty: 5 },
-    ],
-  },
-];
 
 const split = (qty: number, parts: number) =>
   Array.from({ length: parts }, (_, i) =>
@@ -225,7 +252,7 @@ export function expandPackage(
       }))
       .filter((c) => c.total > 0)
       .sort((a, b) => b.total - a.total)
-      // Pocos modelos y colores por categoría para que la corrida S–XL quede completa
+      // Pocos modelos y colores por categoría para que la corrida de tallas quede completa
       .slice(0, mix.qty >= 12 ? 2 : 1);
 
     if (candidates.length === 0) {

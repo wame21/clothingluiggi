@@ -1,11 +1,26 @@
 "use client";
 
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import { useCallback, useMemo } from "react";
 import { create } from "zustand";
+import { activeBranches, applyBranches, posBranches, warehouseOf } from "./branches";
+import { APP_NAME } from "./constants";
+import {
+  applyCatalogSettings,
+  applySalesSettings,
+  catalogFrom,
+  profileFrom,
+  salesFrom,
+  type BusinessProfile,
+  type CatalogSettings,
+  type SalesSettings,
+} from "./settings";
 import { supabase } from "./supabase/client";
 import type {
   AppRole,
+  Branch,
   BranchId,
+  Business,
   Channel,
   Customer,
   ErpData,
@@ -24,7 +39,7 @@ import type {
   StockMap,
   TierId,
 } from "./types";
-import { applyWholesaleSettings, wholesaleSnapshot, type WholesaleSettings } from "./wholesale";
+import { applyWholesaleSettings, wholesaleFrom, wholesaleSnapshot, type WholesaleSettings } from "./wholesale";
 
 export interface NewOrderInput {
   channel: Channel;
@@ -43,11 +58,23 @@ export interface NewOrderInput {
   seller?: string;
 }
 
+/** Datos para crear (sin `id`) o editar (con `id`) una sucursal. */
+export interface BranchInput {
+  id?: BranchId;
+  name: string;
+  short: string;
+  address: string;
+  pos: boolean;
+  isWarehouse: boolean;
+  active: boolean;
+  sort?: number;
+}
+
 type StockEntry = { variantKey: string; qty: number };
 type PaymentInput = Omit<Payment, "id" | "date">;
 
 /** Tablas que se recargan cuando cambian (por esta pestaña o por otro usuario en tiempo real). */
-type Table = "products" | "stock" | "movements" | "orders" | "customers" | "quotes" | "expenses";
+type Table = "products" | "stock" | "movements" | "orders" | "customers" | "quotes" | "expenses" | "branches" | "settings";
 
 interface Actions {
   init: () => Promise<void>;
@@ -74,9 +101,38 @@ interface Actions {
   removeExpense: (id: string) => Promise<void>;
 
   loadTeam: () => Promise<void>;
-  setMember: (id: string, role: AppRole, branch: BranchId) => Promise<void>;
+  setMember: (id: string, role: AppRole, branch: BranchId | null) => Promise<void>;
 
+  /** Nombre y prefijos de folio del negocio (solo dueño). */
+  saveBusiness: (b: { name: string; orderPrefix: string; quotePrefix: string }) => Promise<void>;
+  /** Genera un código de invitación nuevo (el anterior deja de servir) y lo devuelve. */
+  regenerateInviteCode: () => Promise<string>;
+
+  saveProfileSettings: (next: BusinessProfile) => Promise<void>;
+  saveCatalog: (next: CatalogSettings) => Promise<void>;
+  saveSales: (next: SalesSettings) => Promise<void>;
   saveWholesale: (next: WholesaleSettings) => Promise<void>;
+
+  /** Crea o edita una sucursal; nunca se borran. Marcar `isWarehouse` desmarca la anterior. */
+  saveBranch: (b: BranchInput) => Promise<Branch>;
+
+  /** Sube el logo al bucket `logos`, lo guarda en `profileSettings.logoUrl` y devuelve la URL pública. */
+  uploadLogo: (file: File) => Promise<string>;
+  removeLogo: () => Promise<void>;
+}
+
+/** Configuración del negocio cargada de Supabase; sus snapshots hacen que React se re-renderice. */
+interface Config {
+  business: Business | null;
+  branches: Branch[];
+  /** `settings.profile` */
+  profileSettings: BusinessProfile;
+  /** `settings.catalog` */
+  catalog: CatalogSettings;
+  /** `settings.sales` */
+  sales: SalesSettings;
+  /** `settings.wholesale` */
+  wholesale: WholesaleSettings;
 }
 
 interface Session {
@@ -86,13 +142,13 @@ interface Session {
   /** Rol efectivo para la interfaz; los pendientes nunca llegan a ver datos. */
   role: Role;
   team: Profile[];
-  /** Mayoreo y datos para depósito (`settings.wholesale`). */
-  wholesale: WholesaleSettings;
   /** Conectado al canal de tiempo real. */
   live: boolean;
 }
 
-export type ErpState = ErpData & Session & Actions;
+type Data = ErpData & Config;
+
+export type ErpState = Data & Session & Actions;
 
 /* ------------------------------------------------------------------ */
 /* Filas de Postgres ↔ tipos de la app                                  */
@@ -105,11 +161,31 @@ const num = (v: unknown) => Number(v ?? 0);
 
 const toProfile = (r: Row): Profile => ({
   id: r.id,
+  businessId: r.business_id,
   name: r.name,
   email: opt(r.email),
   role: r.role,
-  branch: r.branch,
+  branch: r.branch ?? null,
   createdAt: r.created_at,
+});
+
+const toBusiness = (r: Row): Business => ({
+  id: r.id,
+  name: r.name,
+  inviteCode: r.invite_code,
+  orderPrefix: r.order_prefix,
+  quotePrefix: r.quote_prefix,
+});
+
+const toBranch = (r: Row): Branch => ({
+  id: r.id,
+  name: r.name,
+  short: r.short,
+  address: r.address ?? "",
+  pos: r.pos,
+  isWarehouse: r.is_warehouse,
+  active: r.active,
+  sort: num(r.sort),
 });
 
 const toProduct = (r: Row): Product => ({
@@ -147,7 +223,7 @@ const productRow = (p: Partial<Product>): Row => {
 const toStock = (rows: Row[]): StockMap => {
   const map: StockMap = {};
   for (const r of rows) {
-    map[r.variant_key] ??= { andara: 0, bamoa: 0, bodega: 0 };
+    map[r.variant_key] ??= {};
     map[r.variant_key][r.branch as BranchId] = r.qty;
   }
   return map;
@@ -264,7 +340,8 @@ function must<T>(res: { data: T | null; error: { message: string } | null }): T 
   return res.data as T;
 }
 
-const LOADERS: Record<Table, () => Promise<Partial<ErpData>>> = {
+/** Las configuraciones y sucursales vigentes se aplican al cargar, antes del primer render. */
+const LOADERS: Record<Table, (businessId: string) => Promise<Partial<Data>>> = {
   products: async () => ({ products: (await fetchAll("products", [["created_at", true]])).map(toProduct) }),
   stock: async () => ({ stock: toStock(await fetchAll("stock", [["variant_key", true], ["branch", true]])) }),
   movements: async () => {
@@ -275,19 +352,43 @@ const LOADERS: Record<Table, () => Promise<Partial<ErpData>>> = {
   customers: async () => ({ customers: (await fetchAll("customers", [["since", true]])).map(toCustomer) }),
   quotes: async () => ({ quotes: (await fetchAll("quotes", [["date", true]])).map(toQuote) }),
   expenses: async () => ({ expenses: (await fetchAll("expenses", [["date", false]])).map(toExpense) }),
+  branches: async () => {
+    const branches = (await fetchAll("branches", [["sort", true], ["created_at", true]])).map(toBranch);
+    applyBranches(branches);
+    return { branches };
+  },
+  settings: async (businessId) => {
+    const rows = must(await supabase().from("settings").select("key, value").eq("business_id", businessId)) as Row[];
+    const value = (key: string) => rows.find((r) => r.key === key)?.value;
+    const catalog = catalogFrom(value("catalog"));
+    const sales = salesFrom(value("sales"));
+    applyCatalogSettings(catalog);
+    applySalesSettings(sales);
+    applyWholesaleSettings(wholesaleFrom(value("wholesale")));
+    return { profileSettings: profileFrom(value("profile")), catalog, sales, wholesale: wholesaleSnapshot() };
+  },
 };
 
 const ALL_TABLES = Object.keys(LOADERS) as Table[];
 
-async function loadSettings() {
-  const row = must(await supabase().from("settings").select("value").eq("key", "wholesale").maybeSingle()) as Row | null;
-  if (row) applyWholesaleSettings(row.value as WholesaleSettings);
+async function loadBusiness(businessId: string) {
+  return toBusiness(must(await supabase().from("businesses").select("*").eq("id", businessId).single()));
 }
 
 const upsert = <T extends { id: string }>(list: T[], item: T) =>
   list.some((x) => x.id === item.id) ? list.map((x) => (x.id === item.id ? item : x)) : [...list, item];
 
 const EMPTY: ErpData = { products: [], stock: {}, movements: [], orders: [], customers: [], quotes: [], expenses: [] };
+
+/** Mientras cargan, se usan los valores por defecto de cada configuración. */
+const DEFAULT_CONFIG: Config = {
+  business: null,
+  branches: [],
+  profileSettings: profileFrom(undefined),
+  catalog: catalogFrom(undefined),
+  sales: salesFrom(undefined),
+  wholesale: wholesaleSnapshot(),
+};
 
 let channel: RealtimeChannel | undefined;
 
@@ -297,6 +398,20 @@ function goToLogin() {
   window.location.assign("/login");
 }
 const pending = new Map<Table, ReturnType<typeof setTimeout>>();
+
+const LOGOS_BUCKET = "logos";
+
+/** Ruta dentro del bucket a partir de la URL pública de un logo. */
+const logoPath = (url: string) => {
+  const tail = url.split(`/${LOGOS_BUCKET}/`)[1];
+  return tail ? decodeURIComponent(tail.split("?")[0]) : undefined;
+};
+
+/** Borra el archivo de un logo anterior; si falla no importa, solo queda un archivo huérfano. */
+async function removeLogoFile(url: string | null) {
+  const path = url ? logoPath(url) : undefined;
+  if (path) await supabase().storage.from(LOGOS_BUCKET).remove([path]).catch(() => {});
+}
 
 export const useErp = create<ErpState>()((set, get) => {
   /** Recarga una tabla poco después del último cambio, para agrupar ráfagas de eventos. */
@@ -314,18 +429,35 @@ export const useErp = create<ErpState>()((set, get) => {
   const subscribe = () => {
     if (channel) return;
     channel = supabase().channel("erp");
-    for (const table of ["orders", "stock", "quotes", "customers", "products", "expenses"] as const)
+    for (const table of ["orders", "stock", "quotes", "customers", "products", "expenses", "branches", "settings"] as const)
       channel.on("postgres_changes", { event: "*", schema: "public", table }, () => schedule(table));
     channel.subscribe((status) => set({ live: status === "SUBSCRIBED" }));
   };
 
+  const businessId = () => {
+    const id = get().profile?.businessId;
+    if (!id) throw new Error("No hay una sesión activa");
+    return id;
+  };
+
+  /** Guarda un valor de `settings` del negocio (llave única por negocio). */
+  const saveSetting = async (key: "profile" | "catalog" | "sales" | "wholesale", value: unknown) => {
+    must(
+      await supabase()
+        .from("settings")
+        .upsert({ business_id: businessId(), key, value, updated_at: new Date().toISOString() }, { onConflict: "business_id,key" })
+        .select()
+        .single(),
+    );
+  };
+
   return {
     ...EMPTY,
+    ...DEFAULT_CONFIG,
     status: "loading",
     profile: null,
     role: "vendedor",
     team: [],
-    wholesale: wholesaleSnapshot(),
     live: false,
 
     init: async () => {
@@ -340,8 +472,11 @@ export const useErp = create<ErpState>()((set, get) => {
           set({ status: "ready" });
           return;
         }
-        const [, ...parts] = await Promise.all([loadSettings(), ...ALL_TABLES.map((t) => LOADERS[t]())]);
-        set({ ...Object.assign({}, ...parts), wholesale: wholesaleSnapshot(), status: "ready" });
+        const [business, ...parts] = await Promise.all([
+          loadBusiness(profile.businessId),
+          ...ALL_TABLES.map((t) => LOADERS[t](profile.businessId)),
+        ]);
+        set({ ...Object.assign({}, ...parts), business, status: "ready" });
         subscribe();
       } catch (e) {
         set({ status: "error", error: errorMessage(e) });
@@ -356,7 +491,8 @@ export const useErp = create<ErpState>()((set, get) => {
     },
 
     reload: async (tables) => {
-      const parts = await Promise.all(tables.map((t) => LOADERS[t]()));
+      const id = businessId();
+      const parts = await Promise.all(tables.map((t) => LOADERS[t](id)));
       set(Object.assign({}, ...parts));
     },
 
@@ -468,21 +604,137 @@ export const useErp = create<ErpState>()((set, get) => {
       set((s) => ({ team: s.team.map((m) => (m.id === id ? profile : m)) }));
     },
 
-    saveWholesale: async (next) => {
-      must(
-        await supabase()
-          .from("settings")
-          .upsert({ key: "wholesale", value: next, updated_at: new Date().toISOString() })
-          .select()
-          .single(),
+    saveBusiness: async (b) => {
+      const business = toBusiness(
+        must(
+          await supabase().rpc("update_business", { p_name: b.name, p_order_prefix: b.orderPrefix, p_quote_prefix: b.quotePrefix }),
+        ) as Row,
       );
+      set({ business });
+    },
+
+    regenerateInviteCode: async () => {
+      const code = must(await supabase().rpc("regenerate_invite_code")) as string;
+      set((s) => ({ business: s.business && { ...s.business, inviteCode: code } }));
+      return code;
+    },
+
+    saveProfileSettings: async (next) => {
+      await saveSetting("profile", next);
+      set({ profileSettings: next });
+    },
+
+    saveCatalog: async (next) => {
+      await saveSetting("catalog", next);
+      applyCatalogSettings(next);
+      set({ catalog: next });
+    },
+
+    saveSales: async (next) => {
+      await saveSetting("sales", next);
+      applySalesSettings(next);
+      set({ sales: next });
+    },
+
+    saveWholesale: async (next) => {
+      await saveSetting("wholesale", next);
       applyWholesaleSettings(next);
       set({ wholesale: wholesaleSnapshot() });
+    },
+
+    saveBranch: async (b) => {
+      const sb = supabase();
+      // Solo puede haber una sucursal que surte: se desmarca la anterior antes de marcar esta
+      let released: string[] = [];
+      if (b.isWarehouse) {
+        let q = sb.from("branches").update({ is_warehouse: false }).eq("is_warehouse", true);
+        if (b.id) q = q.neq("id", b.id);
+        released = must(await q.select("id")).map((r: Row) => r.id);
+      }
+      const row: Row = { name: b.name, short: b.short, address: b.address, pos: b.pos, is_warehouse: b.isWarehouse, active: b.active };
+      try {
+        let saved: Branch;
+        if (b.id) {
+          if (b.sort !== undefined) row.sort = b.sort;
+          saved = toBranch(must(await sb.from("branches").update(row).eq("id", b.id).select().single()));
+        } else {
+          row.sort = b.sort ?? Math.max(-1, ...get().branches.map((x) => x.sort)) + 1;
+          saved = toBranch(must(await sb.from("branches").insert(row).select().single()));
+        }
+        await get().reload(["branches", "stock"]);
+        return saved;
+      } catch (e) {
+        if (released.length) await sb.from("branches").update({ is_warehouse: true }).in("id", released);
+        throw e;
+      }
+    },
+
+    uploadLogo: async (file) => {
+      const ext = (file.name.split(".").pop() || file.type.split("/")[1] || "png").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const path = `${businessId()}/logo-${Date.now()}.${ext || "png"}`;
+      const bucket = supabase().storage.from(LOGOS_BUCKET);
+      const { error } = await bucket.upload(path, file, { contentType: file.type || undefined, upsert: false });
+      if (error) throw new Error(error.message);
+      const url = bucket.getPublicUrl(path).data.publicUrl;
+      const previous = get().profileSettings.logoUrl;
+      await get().saveProfileSettings({ ...get().profileSettings, logoUrl: url });
+      await removeLogoFile(previous);
+      return url;
+    },
+
+    removeLogo: async () => {
+      const previous = get().profileSettings.logoUrl;
+      await get().saveProfileSettings({ ...get().profileSettings, logoUrl: null });
+      await removeLogoFile(previous);
     },
   };
 });
 
+/* ------------------------------------------------------------------ */
+/* Hooks y selectores                                                   */
+/* ------------------------------------------------------------------ */
 export const useIsOwner = () => useErp((s) => s.role === "dueno");
+
+/** Nombre del negocio; mientras carga (o sin sesión) el del producto. */
+export const useBusinessName = () => useErp((s) => s.business?.name ?? APP_NAME);
+
+/** Todas las sucursales, también las archivadas (para resolver nombres de datos históricos). */
+export const useBranches = () => useErp((s) => s.branches);
+
+/** Sucursales activas, en orden. */
+export function useActiveBranches() {
+  const branches = useErp((s) => s.branches);
+  return useMemo(() => activeBranches(branches), [branches]);
+}
+
+/** Sucursales activas con mostrador (Punto de venta). */
+export function usePosBranches() {
+  const branches = useErp((s) => s.branches);
+  return useMemo(() => posBranches(branches), [branches]);
+}
+
+/** Sucursal que surte mayoreo y pedidos en línea (puede no haber). */
+export const useWarehouse = () => useErp((s) => warehouseOf(s.branches));
+
+/** Nombre corto de una sucursal por id; también resuelve las archivadas. */
+export function useBranchName() {
+  const branches = useErp((s) => s.branches);
+  return useCallback((id: BranchId) => branches.find((b) => b.id === id)?.short ?? id, [branches]);
+}
+
+export const useWholesaleEnabled = () => useErp((s) => s.wholesale.enabled);
+
+/** Canales de venta del negocio; `mayoreo` solo si el módulo de mayoreo está activo. */
+export function useChannels(): Channel[] {
+  const channels = useErp((s) => s.sales.channels);
+  const wholesale = useErp((s) => s.wholesale.enabled);
+  return useMemo(() => {
+    const base = channels.filter((c) => c !== "mayoreo");
+    return wholesale ? [...base, "mayoreo"] : base;
+  }, [channels, wholesale]);
+}
+
+export const useCategories = () => useErp((s) => s.catalog.categories);
 
 /** Mensaje legible de un error lanzado por una acción del store. */
 export function errorMessage(e: unknown) {
