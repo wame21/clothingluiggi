@@ -54,14 +54,14 @@ export function PeriodSelect({
   );
 }
 
-export function Delta({ value, invert = false, className }: { value: number; invert?: boolean; className?: string }) {
+export function Delta({ value, invert = false }: { value: number; invert?: boolean }) {
   if (!Number.isFinite(value)) return null;
-  if (Math.abs(value) < 0.0005) return <span className={cn("text-xs text-muted-foreground tabular", className)}>= 0%</span>;
+  if (Math.abs(value) < 0.0005) return <span className="text-xs text-muted-foreground tabular">= 0%</span>;
   const up = value >= 0;
   const good = invert ? !up : up;
   const Icon = up ? ArrowUpRight : ArrowDownRight;
   return (
-    <span className={cn("inline-flex items-center gap-0.5 text-xs font-medium tabular", good ? "text-success" : "text-destructive", className)}>
+    <span className={cn("inline-flex items-center gap-0.5 text-xs font-medium tabular", good ? "text-success" : "text-destructive")}>
       <Icon className="size-3.5" />
       {pct(Math.abs(value))}
     </span>
@@ -142,8 +142,8 @@ export function QuoteStatusBadge({ status }: { status: QuoteStatus }) {
   );
 }
 
-export function ChannelDot({ channel, className }: { channel: Channel; className?: string }) {
-  return <span className={cn("inline-block size-2 shrink-0 rounded-full", className)} style={{ background: CHANNEL_COLOR[channel] }} />;
+export function ChannelDot({ channel }: { channel: Channel }) {
+  return <span className="inline-block size-2 shrink-0 rounded-full" style={{ background: CHANNEL_COLOR[channel] }} />;
 }
 
 export function ChannelBadge({ channel }: { channel: Channel }) {

@@ -13,7 +13,7 @@ import { mxn } from "@/lib/format";
 import { errorMessage, useCategories, useErp } from "@/lib/store";
 import { uid } from "@/lib/variants";
 import type { WholesaleSettings } from "@/lib/wholesale";
-import { Field, NumberInput, SaveBar } from "./fields";
+import { Field, NumberInput, round, SaveBar } from "./fields";
 
 /** El formulario trabaja en porcentajes enteros; la base guarda fracciones (0.22). */
 interface Form {
@@ -30,17 +30,17 @@ interface Form {
   packages: { id: string; name: string; description: string; mix: { category: string; qty: number }[] }[];
 }
 
-const toForm = (w: WholesaleSettings): Form => ({
+export const toForm = (w: WholesaleSettings): Form => ({
   enabled: w.enabled,
   clabe: w.bank.clabe,
   bank: w.bank.bank,
   holder: w.bank.holder,
-  depositPct: Math.round(w.depositPct * 100),
+  depositPct: round(w.depositPct * 100, 2),
   freeShippingFrom: w.freeShippingFrom,
   flatShipping: w.flatShipping,
   validityDays: w.validityDays,
   distributorCustomerMin: w.distributorCustomerMin,
-  tiers: w.tiers.map((t) => ({ id: t.id, name: t.name, minPieces: t.minPieces, discountPct: Math.round(t.discount * 100) })),
+  tiers: w.tiers.map((t) => ({ id: t.id, name: t.name, minPieces: t.minPieces, discountPct: round(t.discount * 100, 2) })),
   packages: w.packages.map((p) => ({ id: p.id, name: p.name, description: p.description, mix: p.mix.map((m) => ({ ...m })) })),
 });
 
@@ -53,7 +53,7 @@ function tierDescription(f: Form, i: number) {
   return `${t.minPieces} a ${next.minPieces - 1} piezas surtidas`;
 }
 
-const fromForm = (f: Form): WholesaleSettings => ({
+export const fromForm = (f: Form): WholesaleSettings => ({
   enabled: f.enabled,
   tiers: f.tiers.map((t, i) => ({
     id: t.id,

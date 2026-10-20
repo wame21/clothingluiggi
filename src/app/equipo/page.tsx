@@ -23,8 +23,13 @@ export default function EquipoPage() {
   const loadTeam = useErp((s) => s.loadTeam);
   const me = useErp((s) => s.profile?.id);
 
+  const [loadError, setLoadError] = useState(false);
+
   useEffect(() => {
-    loadTeam().catch((e) => toast.error(errorMessage(e)));
+    loadTeam().catch((e) => {
+      setLoadError(true);
+      toast.error(errorMessage(e));
+    });
   }, [loadTeam]);
 
   const pendientes = team.filter((m) => m.role === "pendiente").length;
@@ -43,7 +48,7 @@ export default function EquipoPage() {
       )}
       <Card className="py-0">
         {team.length === 0 ? (
-          <EmptyState icon={UserCog} title="Cargando equipo…" />
+          <EmptyState icon={UserCog} title={loadError ? "No se pudo cargar el equipo" : "Cargando equipo…"} />
         ) : (
           <Table>
             <TableHeader>

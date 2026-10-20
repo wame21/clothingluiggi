@@ -20,7 +20,7 @@ import type { BranchId, Category, Product } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { productStock, stockOf, variantKey, type QtyMap } from "@/lib/variants";
 
-export function ProductCombobox({
+function ProductCombobox({
   branch,
   onSelect,
   exclude = [],

@@ -35,13 +35,14 @@ export function Field({
   );
 }
 
-export function NumberInput({ value, onChange, step }: { value: number; onChange: (v: number) => void; step?: number }) {
+export const round = (n: number, digits = 4) => Number(n.toFixed(digits));
+
+export function NumberInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <Input
       type="number"
-      inputMode={step && step < 1 ? "decimal" : "numeric"}
+      inputMode="numeric"
       min={0}
-      step={step}
       value={Number.isFinite(value) ? value : ""}
       onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))}
     />

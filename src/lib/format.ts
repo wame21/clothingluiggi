@@ -16,7 +16,7 @@ const mxnCentsFmt = new Intl.NumberFormat("es-MX", {
 
 const numFmt = new Intl.NumberFormat("es-MX", { maximumFractionDigits: 0 });
 
-export const mxn = (n: number) => mxnFmt.format(Math.round(n));
+export const mxn = (n: number) => mxnFmt.format(Math.round(n) || 0);
 export const mxnCents = (n: number) => mxnCentsFmt.format(n);
 export const num = (n: number) => numFmt.format(n);
 
@@ -26,9 +26,8 @@ export const pct = (n: number, digits = 1) =>
 /** Compact currency for chart axes: $12k, $1.2M */
 export const mxnShort = (n: number) => {
   const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `$${Math.round(n / 1_000)}k`;
-  return `$${Math.round(n)}`;
+  const s = abs >= 999_500 ? `${(abs / 1_000_000).toFixed(1)}M` : abs >= 999.5 ? `${Math.round(abs / 1_000)}k` : `${Math.round(abs)}`;
+  return `${n < 0 && s !== "0" ? "-" : ""}$${s}`;
 };
 
 export const fDate = (iso: string) =>
@@ -46,4 +45,3 @@ export const fLongDate = (iso: string) =>
 export const fRelative = (iso: string) =>
   formatDistanceToNowStrict(new Date(iso), { locale: es, addSuffix: true });
 
-export const fMonth = (d: Date) => format(d, "MMM yyyy", { locale: es });

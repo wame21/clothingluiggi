@@ -46,8 +46,9 @@ public.profiles
   - `{ name, invite_code }` → busca el negocio por código (sin distinguir mayúsculas); el perfil queda
     `pendiente` en ese negocio. Código inválido → `raise exception 'Código de invitación inválido'`.
   - Ninguno de los dos → `raise exception 'Falta el nombre del negocio o el código de invitación'`.
-- `public.invite_lookup(p_code text) returns text` — nombre del negocio o `null`. Ejecutable por `anon`
-  (lo usa la pantalla de registro). Reemplaza a `owner_exists()`, que se elimina.
+- `public.invite_lookup(p_code text, p_key text) returns text` — nombre del negocio o `null`. Solo
+  `service_role`: la pantalla de registro la consulta por la Edge Function `invite-lookup` (ver
+  "Límite en `invite_lookup`"). Reemplaza a `owner_exists()`, que se elimina.
 - `public.regenerate_invite_code() returns text` — solo dueño.
 - `public.update_business(p_name text, p_order_prefix text, p_quote_prefix text) returns businesses`
   — solo dueño; los contadores de folio no se editan desde la app.
@@ -113,6 +114,39 @@ save_quote, convert_quote` conservan su firma y comportamiento, más:
 - `convert_quote` aparta de la sucursal `is_warehouse` del negocio; si no hay,
   `raise exception 'Configura qué sucursal surte el mayoreo'`.
 
+### Decisiones de producto (migración `decisiones`)
+
+**Costo oculto a vendedores.** `products.cost` se elimina y `unitCost` ya no vive en `orders.items` ni
+`quotes.items`. El costo está en tablas que solo lee el dueño (RLS `for all to authenticated`:
+`business_id = current_business_id() and is_owner()`), también por API:
+
+- `product_costs (product_id pk → products, business_id, cost numeric(12,2) >= 0)`.
+- `order_costs (order_id pk → orders, business_id, costs jsonb)` con `costs = { "<variantKey>": costo unitario }`.
+- `create_order` ignora el `unitCost` del cliente, guarda `items` sin él y escribe `order_costs` con el
+  costo de `product_costs` al momento de la venta (0 si no hay fila); `convert_quote` lo hereda.
+  `save_quote` guarda `items` sin `unitCost`.
+- App: `Product.cost` y `LineItem.unitCost` siguen en los tipos; el dueño los llena desde estas
+  tablas al cargar y para el vendedor valen 0 (no las consulta).
+
+**Recoge en sucursal.** `orders.pickup boolean not null default false` (los pedidos con
+"Recoge en sucursal" en las notas migran a `true`). `create_order` lee `pickup` del payload; la app ya
+no antepone el texto a las notas.
+
+**Transiciones de `set_order_status`** (además de `Pedido no encontrado` y `El pedido ya está cancelado`):
+`cancelado` desde cualquier estado salvo `entregado`; `enviado` solo desde `pagado` y sin `pickup`;
+`entregado` solo desde `enviado`, o desde `pagado` si es `pickup`. Otra combinación →
+`No se puede cambiar el pedido de <prev> a <nuevo>`. `pendiente → apartado → pagado` los mueven los pagos.
+
+**Límite en `invite_lookup`.** Tabla `invite_attempts (key text, at timestamptz)` con RLS sin políticas y
+sin permisos para `anon`/`authenticated`. El login llama a la Edge Function `invite-lookup`
+(`supabase/functions/invite-lookup`, `verify_jwt = false`) con `{ code }`. La función toma como llave la
+IP de `cf-connecting-ip`, que pone Cloudflare y el cliente no puede alterar (en local, sin Cloudflare, el
+primer `x-forwarded-for`), y llama a `invite_lookup(p_code, p_key)` con la llave secreta. La función SQL
+(`plpgsql volatile security definer`, solo `service_role`) serializa por llave con un advisory lock,
+borra intentos de más de 1 hora y con 30 o más en 10 minutos lanza `Demasiados intentos, espera unos
+minutos` con `errcode PT429`. Respuestas: `200 { name }`, `429 { error }` o `500 { error }`. El login
+muestra `error` con `toast.error`. Despliegue: `supabase functions deploy invite-lookup --no-verify-jwt`.
+
 ### Storage
 
 Bucket público `logos`. Ruta `<business_id>/<archivo>`. Solo el dueño de ese negocio puede subir,
@@ -121,7 +155,7 @@ El bucket acepta solo `image/png`, `image/jpeg` e `image/webp`, de hasta 2 MB.
 
 ### Precisiones de la línea base
 
-La línea base está en `supabase/migrations/` (`esquema`, `seguridad`, `operaciones`, `storage`); las
+La línea base está en `supabase/migrations/` (`esquema`, `seguridad`, `operaciones`, `storage`, `correcciones`, `decisiones`); las
 migraciones de la tienda original quedan como referencia en `supabase/_legacy/` (no se versionan).
 
 - `businesses.invite_code` tiene `default generate_invite_code()` (interna, no ejecutable por la app).
@@ -136,7 +170,7 @@ migraciones de la tienda original quedan como referencia en `supabase/_legacy/` 
 - `transfer_stock` anota en el kardex `Hacia <nombre de sucursal>` / `Desde <nombre de sucursal>`.
 - `handle_new_user` falla con los mensajes en español del contrato; Supabase Auth los devuelve al
   cliente como un error genérico de registro ("Database error saving new user").
-- Realtime: `orders, stock, quotes, customers, products, expenses, branches, settings`.
+- Realtime: `orders, stock, quotes, customers, products, expenses, branches, settings, product_costs, order_costs`.
 
 ### Configuración inicial de un negocio nuevo
 

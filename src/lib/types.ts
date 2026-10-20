@@ -133,6 +133,8 @@ export interface Order {
   quoteId?: string;
   tierId?: TierId;
   seller?: string;
+  /** Recoge en sucursal (sin envío). */
+  pickup: boolean;
 }
 
 export type CustomerType = "menudeo" | "mayorista" | "distribuidor";

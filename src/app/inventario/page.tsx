@@ -41,7 +41,7 @@ import { inventoryValue, replenishment } from "@/lib/metrics";
 import { errorMessage, useActiveBranches, useBranchName, useErp, useIsOwner, useWarehouse } from "@/lib/store";
 import type { BranchId, Category, MovementType, Product, StockMap } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { productStock, stockOf, variantKey, type QtyMap } from "@/lib/variants";
+import { hasKeySeparator, productStock, stockOf, variantKey, type QtyMap } from "@/lib/variants";
 
 const MOVE_LABEL: Record<MovementType, { label: string; cls: string }> = {
   venta: { label: "Venta", cls: "bg-ch-web/12 text-ch-web" },
@@ -688,7 +688,7 @@ function NewProductDialog({ onCreated }: { onCreated: (id: string) => void }) {
   const catalog = useErp((s) => s.catalog);
   const businessName = useErp((s) => s.business?.name ?? "");
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({
+  const blank = () => ({
     name: "",
     brand: businessName,
     category: catalog.categories[0] ?? "",
@@ -697,14 +697,16 @@ function NewProductDialog({ onCreated }: { onCreated: (id: string) => void }) {
     preset: catalog.sizePresets[0]?.name ?? "",
     colors: "Negro, Blanco",
   });
+  const [f, setF] = useState(blank);
   const sizes = catalog.sizePresets.find((p) => p.name === f.preset)?.sizes ?? [];
   const missingSetup = catalog.categories.length === 0 || catalog.sizePresets.length === 0;
-  const colorList = f.colors.split(",").map((c) => c.trim()).filter(Boolean);
+  const colorList = [...new Set(f.colors.split(",").map((c) => c.trim()).filter(Boolean))];
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
     if (!f.name.trim() || f.price <= 0) return toast.error("Nombre y precio son obligatorios");
     if (!f.category || !sizes.length) return toast.error("Elige categoría y tallas");
+    if (colorList.some(hasKeySeparator)) return toast.error("Los colores no pueden llevar el carácter «|»");
     const palette = ["#111111", "#f4f4f2", "#1c2a44", "#5e1a26", "#cbb89a", "#56603a", "#8a8a8a"];
     setSaving(true);
     let p: Product;
@@ -728,6 +730,7 @@ function NewProductDialog({ onCreated }: { onCreated: (id: string) => void }) {
     }
     toast.success(`${p.name} dado de alta · registra su primera entrada`);
     setOpen(false);
+    setF(blank());
     onCreated(p.id);
   };
 

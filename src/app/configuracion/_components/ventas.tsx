@@ -11,7 +11,7 @@ import { CHANNEL_LABEL, PAYMENT_LABEL } from "@/lib/constants";
 import type { SalesSettings } from "@/lib/settings";
 import { errorMessage, useErp, useWholesaleEnabled } from "@/lib/store";
 import type { Channel, PaymentMethod } from "@/lib/types";
-import { Field, SaveBar } from "./fields";
+import { Field, round, SaveBar } from "./fields";
 
 /** Canales que el negocio elige; `mayoreo` depende del interruptor de Mayoreo. */
 const STORE_CHANNELS: Channel[] = ["tienda", "web", "instagram", "whatsapp"];
@@ -23,8 +23,6 @@ interface Form {
   carriers: string[];
   fees: Record<PaymentMethod, string>;
 }
-
-const round = (n: number, digits = 4) => Number(n.toFixed(digits));
 
 const toForm = (s: SalesSettings): Form => ({
   channels: s.channels.filter((c) => STORE_CHANNELS.includes(c)),

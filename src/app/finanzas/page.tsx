@@ -46,6 +46,7 @@ export default function FinanzasPage() {
   const removeExpense = useErp((s) => s.removeExpense);
   const branchName = useBranchName();
   const [period, setPeriod] = useState<Period>("mes");
+  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   const d = useMemo(() => {
     const { cur, prev } = periodRange(period);
@@ -264,10 +265,12 @@ export default function FinanzasPage() {
                 <TableCell className="text-right font-medium tabular">{mxn(e.amount)}</TableCell>
                 <TableCell className="pr-4">
                   <Button
-                    variant="ghost"
+                    variant={confirmId === e.id ? "destructive" : "ghost"}
                     size="icon-xs"
-                    aria-label="Eliminar gasto"
+                    aria-label={confirmId === e.id ? "Confirmar eliminación" : "Eliminar gasto"}
                     onClick={() => {
+                      if (confirmId !== e.id) return setConfirmId(e.id);
+                      setConfirmId(null);
                       removeExpense(e.id)
                         .then(() => toast("Gasto eliminado"))
                         .catch((err) => toast.error(errorMessage(err)));

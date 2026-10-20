@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { onlyDigits } from "@/lib/clabe";
 import { CUSTOMER_TYPE_LABEL } from "@/lib/constants";
 import { fDate, fRelative, mxn, num } from "@/lib/format";
 import { orderBalance } from "@/lib/metrics";
@@ -179,7 +180,7 @@ function CustomerSheet({ row, now }: { row: Row; now: number }) {
   const favMap = new Map<string, number>();
   for (const o of row.orders) for (const it of o.items) favMap.set(it.name, (favMap.get(it.name) ?? 0) + it.qty);
   const favorite = [...favMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
-  const waPhone = `52${c.phone.replace(/\D/g, "")}`;
+  const waPhone = `52${onlyDigits(c.phone).slice(-10)}`;
   const waText = encodeURIComponent(
     !wholesaleOn || c.type === "menudeo"
       ? `Hola ${c.name.split(" ")[0]}, te saluda ${businessName}. Nos llegó mercancía nueva que te va a gustar.`

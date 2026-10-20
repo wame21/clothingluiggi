@@ -56,6 +56,7 @@ export interface NewOrderInput {
   tierId?: TierId;
   quoteId?: string;
   seller?: string;
+  pickup?: boolean;
 }
 
 /** Datos para crear (sin `id`) o editar (con `id`) una sucursal. */
@@ -188,13 +189,14 @@ const toBranch = (r: Row): Branch => ({
   sort: num(r.sort),
 });
 
-const toProduct = (r: Row): Product => ({
+/** El costo vive en `product_costs` (solo el dueño lo lee); sin él vale 0. */
+const toProduct = (r: Row, cost = 0): Product => ({
   id: r.id,
   sku: r.sku,
   name: r.name,
   brand: r.brand,
   category: r.category,
-  cost: num(r.cost),
+  cost,
   price: num(r.price),
   sizes: r.sizes,
   colors: r.colors,
@@ -210,7 +212,6 @@ const productRow = (p: Partial<Product>): Row => {
   if (p.name !== undefined) r.name = p.name;
   if (p.brand !== undefined) r.brand = p.brand;
   if (p.category !== undefined) r.category = p.category;
-  if (p.cost !== undefined) r.cost = p.cost;
   if (p.price !== undefined) r.price = p.price;
   if (p.sizes !== undefined) r.sizes = p.sizes;
   if (p.colors !== undefined) r.colors = p.colors;
@@ -241,7 +242,8 @@ const toMovement = (r: Row): Movement => ({
   note: opt(r.note),
 });
 
-const toOrder = (r: Row): Order => ({
+/** `costs` = costo unitario por variante de `order_costs` (solo el dueño); sin él vale 0. */
+const toOrder = (r: Row, costs: Row = {}): Order => ({
   id: r.id,
   folio: r.folio,
   date: r.date,
@@ -249,7 +251,7 @@ const toOrder = (r: Row): Order => ({
   customerId: opt(r.customer_id),
   customerName: r.customer_name,
   branch: r.branch,
-  items: r.items,
+  items: (r.items as LineItem[]).map((i) => ({ ...i, unitCost: num(costs[i.variantKey]) })),
   subtotal: num(r.subtotal),
   discount: num(r.discount),
   shipping: num(r.shipping),
@@ -261,6 +263,7 @@ const toOrder = (r: Row): Order => ({
   quoteId: opt(r.quote_id),
   tierId: opt(r.tier_id),
   seller: opt(r.seller),
+  pickup: r.pickup ?? false,
 });
 
 const toCustomer = (r: Row): Customer => ({
@@ -285,14 +288,15 @@ const customerRow = (c: Partial<Customer>): Row => {
   return r;
 };
 
-const toQuote = (r: Row): Quote => ({
+/** `costs` = costo actual por producto de `product_costs` (solo el dueño); sin él vale 0. */
+const toQuote = (r: Row, costs: Row = {}): Quote => ({
   id: r.id,
   folio: r.folio,
   date: r.date,
   validUntil: r.valid_until,
   customerId: r.customer_id,
   customerName: r.customer_name,
-  items: r.items,
+  items: (r.items as LineItem[]).map((i) => ({ ...i, unitCost: num(costs[i.productId]) })),
   tierId: r.tier_id,
   subtotalList: num(r.subtotal_list),
   discount: num(r.discount),
@@ -341,19 +345,35 @@ function must<T>(res: { data: T | null; error: { message: string } | null }): T 
 }
 
 /** Las configuraciones y sucursales vigentes se aplican al cargar, antes del primer render. */
-const LOADERS: Record<Table, (businessId: string) => Promise<Partial<Data>>> = {
-  products: async () => ({ products: (await fetchAll("products", [["created_at", true]])).map(toProduct) }),
+const productCosts = async (owner: boolean): Promise<Row> =>
+  owner ? Object.fromEntries((await fetchAll("product_costs", [["product_id", true]])).map((r) => [r.product_id, r.cost])) : {};
+
+const LOADERS: Record<Table, (businessId: string, owner: boolean) => Promise<Partial<Data>>> = {
+  products: async (_, owner) => {
+    const [rows, costs] = await Promise.all([fetchAll("products", [["created_at", true], ["id", true]]), productCosts(owner)]);
+    return { products: rows.map((r) => toProduct(r, num(costs[r.id]))) };
+  },
   stock: async () => ({ stock: toStock(await fetchAll("stock", [["variant_key", true], ["branch", true]])) }),
   movements: async () => {
     const res = await supabase().from("movements").select("*").order("date", { ascending: false }).limit(MOVEMENTS_LIMIT);
     return { movements: must(res).map(toMovement) };
   },
-  orders: async () => ({ orders: (await fetchAll("orders", [["date", true]])).map(toOrder) }),
-  customers: async () => ({ customers: (await fetchAll("customers", [["since", true]])).map(toCustomer) }),
-  quotes: async () => ({ quotes: (await fetchAll("quotes", [["date", true]])).map(toQuote) }),
-  expenses: async () => ({ expenses: (await fetchAll("expenses", [["date", false]])).map(toExpense) }),
+  orders: async (_, owner) => {
+    const [rows, costRows] = await Promise.all([
+      fetchAll("orders", [["date", true], ["id", true]]),
+      owner ? fetchAll("order_costs", [["order_id", true]]) : [],
+    ]);
+    const costs = Object.fromEntries(costRows.map((r) => [r.order_id, r.costs]));
+    return { orders: rows.map((r) => toOrder(r, costs[r.id])) };
+  },
+  customers: async () => ({ customers: (await fetchAll("customers", [["since", true], ["id", true]])).map(toCustomer) }),
+  quotes: async (_, owner) => {
+    const [rows, costs] = await Promise.all([fetchAll("quotes", [["date", true], ["id", true]]), productCosts(owner)]);
+    return { quotes: rows.map((r) => toQuote(r, costs)) };
+  },
+  expenses: async () => ({ expenses: (await fetchAll("expenses", [["date", false], ["id", true]])).map(toExpense) }),
   branches: async () => {
-    const branches = (await fetchAll("branches", [["sort", true], ["created_at", true]])).map(toBranch);
+    const branches = (await fetchAll("branches", [["sort", true], ["created_at", true], ["id", true]])).map(toBranch);
     applyBranches(branches);
     return { branches };
   },
@@ -400,6 +420,7 @@ function goToLogin() {
 const pending = new Map<Table, ReturnType<typeof setTimeout>>();
 
 const LOGOS_BUCKET = "logos";
+const LOGO_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
 
 /** Ruta dentro del bucket a partir de la URL pública de un logo. */
 const logoPath = (url: string) => {
@@ -426,11 +447,21 @@ export const useErp = create<ErpState>()((set, get) => {
     );
   };
 
+  // La escritura ya quedó guardada: si la recarga falla, realtime vuelve a sincronizar.
+  const refresh = (tables: Table[]) => get().reload(tables).catch((e) => console.error(e));
+
   const subscribe = () => {
     if (channel) return;
     channel = supabase().channel("erp");
     for (const table of ["orders", "stock", "quotes", "customers", "products", "expenses", "branches", "settings"] as const)
       channel.on("postgres_changes", { event: "*", schema: "public", table }, () => schedule(table));
+    if (get().role === "dueno") {
+      channel.on("postgres_changes", { event: "*", schema: "public", table: "product_costs" }, () => {
+        schedule("products");
+        schedule("quotes");
+      });
+      channel.on("postgres_changes", { event: "*", schema: "public", table: "order_costs" }, () => schedule("orders"));
+    }
     channel.subscribe((status) => set({ live: status === "SUBSCRIBED" }));
   };
 
@@ -474,7 +505,7 @@ export const useErp = create<ErpState>()((set, get) => {
         }
         const [business, ...parts] = await Promise.all([
           loadBusiness(profile.businessId),
-          ...ALL_TABLES.map((t) => LOADERS[t](profile.businessId)),
+          ...ALL_TABLES.map((t) => LOADERS[t](profile.businessId, profile.role === "dueno")),
         ]);
         set({ ...Object.assign({}, ...parts), business, status: "ready" });
         subscribe();
@@ -492,7 +523,7 @@ export const useErp = create<ErpState>()((set, get) => {
 
     reload: async (tables) => {
       const id = businessId();
-      const parts = await Promise.all(tables.map((t) => LOADERS[t](id)));
+      const parts = await Promise.all(tables.map((t) => LOADERS[t](id, get().role === "dueno")));
       set(Object.assign({}, ...parts));
     },
 
@@ -500,7 +531,7 @@ export const useErp = create<ErpState>()((set, get) => {
       const row = must(await supabase().rpc("create_order", { p: { ...input, seller: input.seller ?? get().profile?.name } }));
       const order = toOrder(row as Row);
       set((s) => ({ orders: upsert(s.orders, order) }));
-      await get().reload(["stock", "movements"]);
+      await refresh(["stock", "movements"]);
       return order;
     },
 
@@ -514,7 +545,7 @@ export const useErp = create<ErpState>()((set, get) => {
         await supabase().rpc("set_order_status", { p_order: orderId, p_status: status, p_shipping: shippingInfo ?? null }),
       );
       set((s) => ({ orders: upsert(s.orders, toOrder(row as Row)) }));
-      if (status === "cancelado") await get().reload(["stock", "movements"]);
+      if (status === "cancelado") await refresh(["stock", "movements"]);
     },
 
     moveStock: async (entries, branch, type, meta) => {
@@ -527,23 +558,27 @@ export const useErp = create<ErpState>()((set, get) => {
           p_note: meta?.note ?? null,
         }),
       );
-      await get().reload(["stock", "movements"]);
+      await refresh(["stock", "movements"]);
     },
 
     transferStock: async (entries, from, to) => {
       must(await supabase().rpc("transfer_stock", { p_entries: entries, p_from: from, p_to: to }));
-      await get().reload(["stock", "movements"]);
+      await refresh(["stock", "movements"]);
     },
 
     addProduct: async (p) => {
-      const product = toProduct(must(await supabase().from("products").insert(productRow(p)).select().single()));
+      const product = toProduct(must(await supabase().from("products").insert(productRow(p)).select().single()), p.cost);
+      must(await supabase().from("product_costs").upsert({ product_id: product.id, cost: p.cost }, { onConflict: "product_id" }));
       set((s) => ({ products: upsert(s.products, product) }));
-      await get().reload(["stock"]);
+      await refresh(["stock"]);
       return product;
     },
 
     updateProduct: async (id, patch) => {
-      const product = toProduct(must(await supabase().from("products").update(productRow(patch)).eq("id", id).select().single()));
+      const row = must(await supabase().from("products").update(productRow(patch)).eq("id", id).select().single()) as Row;
+      if (patch.cost !== undefined)
+        must(await supabase().from("product_costs").upsert({ product_id: id, cost: patch.cost }, { onConflict: "product_id" }));
+      const product = toProduct(row, patch.cost ?? get().products.find((x) => x.id === id)?.cost);
       set((s) => ({ products: upsert(s.products, product) }));
     },
 
@@ -572,7 +607,7 @@ export const useErp = create<ErpState>()((set, get) => {
     convertQuote: async (id, deposit) => {
       const order = toOrder(must(await supabase().rpc("convert_quote", { p_quote: id, p_deposit: deposit })) as Row);
       set((s) => ({ orders: upsert(s.orders, order) }));
-      await get().reload(["quotes", "stock", "movements"]);
+      await refresh(["quotes", "stock", "movements"]);
       return order;
     },
 
@@ -652,8 +687,8 @@ export const useErp = create<ErpState>()((set, get) => {
         released = must(await q.select("id")).map((r: Row) => r.id);
       }
       const row: Row = { name: b.name, short: b.short, address: b.address, pos: b.pos, is_warehouse: b.isWarehouse, active: b.active };
+      let saved: Branch;
       try {
-        let saved: Branch;
         if (b.id) {
           if (b.sort !== undefined) row.sort = b.sort;
           saved = toBranch(must(await sb.from("branches").update(row).eq("id", b.id).select().single()));
@@ -661,23 +696,30 @@ export const useErp = create<ErpState>()((set, get) => {
           row.sort = b.sort ?? Math.max(-1, ...get().branches.map((x) => x.sort)) + 1;
           saved = toBranch(must(await sb.from("branches").insert(row).select().single()));
         }
-        await get().reload(["branches", "stock"]);
-        return saved;
       } catch (e) {
         if (released.length) await sb.from("branches").update({ is_warehouse: true }).in("id", released);
         throw e;
       }
+      await refresh(["branches", "stock"]);
+      return saved;
     },
 
     uploadLogo: async (file) => {
-      const ext = (file.name.split(".").pop() || file.type.split("/")[1] || "png").toLowerCase().replace(/[^a-z0-9]/g, "");
-      const path = `${businessId()}/logo-${Date.now()}.${ext || "png"}`;
+      const ext = LOGO_EXT[file.type];
+      if (!ext) throw new Error("El logo debe ser PNG, JPG o WebP");
+      if (file.size > 2 * 1024 * 1024) throw new Error("El logo no puede pesar más de 2 MB");
+      const path = `${businessId()}/logo-${Date.now()}.${ext}`;
       const bucket = supabase().storage.from(LOGOS_BUCKET);
       const { error } = await bucket.upload(path, file, { contentType: file.type || undefined, upsert: false });
       if (error) throw new Error(error.message);
       const url = bucket.getPublicUrl(path).data.publicUrl;
       const previous = get().profileSettings.logoUrl;
-      await get().saveProfileSettings({ ...get().profileSettings, logoUrl: url });
+      try {
+        await get().saveProfileSettings({ ...get().profileSettings, logoUrl: url });
+      } catch (e) {
+        await removeLogoFile(url);
+        throw e;
+      }
       await removeLogoFile(previous);
       return url;
     },

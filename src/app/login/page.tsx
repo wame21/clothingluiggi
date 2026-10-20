@@ -3,12 +3,14 @@
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
+import { toast } from "sonner";
 import { BrandLockup } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { errorMessage } from "@/lib/store";
 import { supabase } from "@/lib/supabase/client";
 
 const AUTH_ERRORS: Record<string, string> = {
@@ -57,8 +59,13 @@ export default function LoginPage() {
   useEffect(() => {
     if (mode !== "unirme" || !codeReady) return;
     const timer = setTimeout(async () => {
-      const { data, error } = await supabase().rpc("invite_lookup", { p_code: code });
-      if (!error) setLookup({ code, name: (data as string | null) ?? null });
+      const { data, error } = await supabase().functions.invoke<{ name: string | null }>("invite-lookup", { body: { code } });
+      if (error) {
+        // La función responde { error } con el mensaje para el usuario (p. ej. el límite de intentos).
+        const body = error.context instanceof Response ? await error.context.json().catch(() => null) : null;
+        toast.error(body?.error ?? errorMessage(error));
+      }
+      setLookup({ code, name: error ? null : (data?.name ?? null) });
     }, 350);
     return () => clearTimeout(timer);
   }, [mode, code, codeReady]);

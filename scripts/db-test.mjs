@@ -1,54 +1,15 @@
 // Pruebas de la base de datos contra el Supabase LOCAL (pnpm exec supabase start).
 // Uso: pnpm exec supabase db reset && pnpm db:test
 // Crea dos negocios y verifica el aislamiento entre ellos, los folios por negocio y las reglas de rol.
-import { execSync } from "node:child_process";
-import { createClient } from "@supabase/supabase-js";
-
-const raw = execSync("pnpm exec supabase status -o json", { encoding: "utf8" });
-const status = JSON.parse(raw.slice(raw.indexOf("{")));
-const URL = status.API_URL;
-const KEY = status.PUBLISHABLE_KEY ?? status.ANON_KEY;
-if (!URL.includes("127.0.0.1") && !URL.includes("localhost")) throw new Error("Solo se ejecuta contra Supabase local");
-
-const PASSWORD = "Prueba123!";
-const results = [];
-const check = (name, ok, detail = "") => results.push(`${ok ? "✓" : "✗"} ${name}${detail ? ` — ${detail}` : ""}`);
-const expectError = async (name, promise, match) => {
-  const { error } = await promise;
-  check(name, !!error && (!match || match.test(error.message)), error ? error.message : "no hubo error");
-};
-// Escrituras que RLS rechaza con error o que simplemente no tocan ninguna fila.
-const expectDenied = async (name, promise) => {
-  const { data, error } = await promise;
-  check(name, !!error || !data || (Array.isArray(data) && data.length === 0), error?.message ?? `${data?.length ?? 0} filas`);
-};
-
-const newClient = () => createClient(URL, KEY, { auth: { persistSession: false } });
-
-async function signUp(email, data) {
-  const c = newClient();
-  const { error } = await c.auth.signUp({ email, password: PASSWORD, options: { data } });
-  return { client: c, error };
-}
-
-async function user(email, data) {
-  const { client, error } = await signUp(email, data);
-  if (error) throw error;
-  const { error: signInErr } = await client.auth.signInWithPassword({ email, password: PASSWORD });
-  if (signInErr) throw signInErr;
-  const { data: me } = await client.auth.getUser();
-  return { db: client, id: me.user.id, email };
-}
-
-const stamp = Date.now();
-const mail = (who) => `${who}${stamp}@example.test`;
+import { check, expectDenied, expectError, inviteLookup, mail, newClient, report, signUp, user } from "./db-helpers.mjs";
 
 // ---------------------------------------------------------------------------
 // Alta de negocios y usuarios
 // ---------------------------------------------------------------------------
-const anon = newClient();
-const { data: unknownCode } = await anon.rpc("invite_lookup", { p_code: "ZZZZZZZZ" });
-check("invite_lookup de un código inexistente = null", unknownCode === null);
+const anon = newClient(`anon-${Date.now()}`);
+const { data: unknownCode } = await inviteLookup(anon, "ZZZZZZZZ");
+check("invite-lookup de un código inexistente = null", unknownCode === null);
+await expectError("anon ya no consulta códigos directo en la base", anon.rpc("invite_lookup", { p_code: "ZZZZZZZZ", p_key: "x" }));
 const { error: legacyErr } = await anon.rpc("owner_exists");
 check("owner_exists ya no existe", !!legacyErr);
 
@@ -81,8 +42,8 @@ const { data: cfgA } = await ownerA.db.from("settings").select("key, value");
 check("configuración inicial: profile, catalog, sales, wholesale", ["profile", "catalog", "sales", "wholesale"].every((k) => cfgA?.some((r) => r.key === k)), cfgA?.map((r) => r.key).join(","));
 check("mayoreo viene desactivado", cfgA?.find((r) => r.key === "wholesale")?.value?.enabled === false);
 
-const { data: lookup } = await anon.rpc("invite_lookup", { p_code: bizA.invite_code.toLowerCase() });
-check("invite_lookup (anon) devuelve el nombre sin distinguir mayúsculas", lookup === "Boutique Alfa", String(lookup));
+const { data: lookup } = await inviteLookup(anon, bizA.invite_code.toLowerCase());
+check("invite-lookup devuelve el nombre sin distinguir mayúsculas", lookup === "Boutique Alfa", String(lookup));
 
 // El vendedor entra con el código en minúsculas; el pendiente con el código tal cual.
 const seller = await user(mail("karla"), { name: "Karla", invite_code: bizA.invite_code.toLowerCase() });
@@ -128,10 +89,11 @@ check("el vendedor queda con su rol y sucursal", sellerAfter?.role === "vendedor
 const colors = [{ name: "Negro", hex: "#111111" }];
 const { data: pA, error: pAErr } = await ownerA.db
   .from("products")
-  .insert({ sku: "T-001", name: "Polo prueba", brand: "Marca", category: "Polos", cost: 255, price: 599, sizes: ["S", "M"], colors, woo_id: 1 })
+  .insert({ sku: "T-001", name: "Polo prueba", brand: "Marca", category: "Polos", price: 599, sizes: ["S", "M"], colors, woo_id: 1 })
   .select()
   .single();
 check("dueño da de alta producto", !pAErr, pAErr?.message);
+await ownerA.db.from("product_costs").insert({ product_id: pA.id, cost: 255 });
 const stockRows = async (db, product) => (await db.from("stock").select("*", { count: "exact", head: true }).eq("product_id", product)).count;
 check("trigger crea 2 tallas × 2 sucursales", (await stockRows(ownerA.db, pA.id)) === 4);
 const { data: bodega, error: bodegaErr } = await ownerA.db.from("branches").insert({ name: "Sucursal Norte", short: "Norte", pos: false, sort: 2 }).select().single();
@@ -146,14 +108,14 @@ await expectError("vendedor no registra entradas", seller.db.rpc("move_stock", {
 const { error: inErr } = await ownerA.db.rpc("move_stock", { p_entries: [{ variantKey: vkA, qty: 3 }], p_branch: centro.id, p_type: "entrada", p_ref: "OC-1" });
 check("dueño registra entrada", !inErr, inErr?.message);
 
-const item = (product, vk, qty) => ({ productId: product.id, variantKey: vk, name: product.name, color: "Negro", size: "M", qty, unitPrice: 599, unitCost: 255, listPrice: 599 });
+const item = (product, vk, qty) => ({ productId: product.id, variantKey: vk, name: product.name, color: "Negro", size: "M", qty, unitPrice: 599, unitCost: 1, listPrice: 599 });
 const order = (product, vk, branch, qty, extra = {}) => ({
   channel: "tienda",
   customerName: "Público general",
   branch,
   items: [item(product, vk, qty)],
   payments: [{ amount: 599 * qty, method: "efectivo" }],
-  status: "entregado",
+  status: "pagado",
   seller: "Karla",
   ...extra,
 });
@@ -173,6 +135,19 @@ const { data: st } = await ownerA.db.from("stock").select("qty").eq("variant_key
 check("existencia final = 0", st?.qty === 0, `qty=${st?.qty}`);
 
 const sold = a.error ? b.data : a.data;
+// Costo oculto: solo el dueño lo lee, también por API; el unitCost que manda el cliente se ignora
+const { data: sellerPc } = await seller.db.from("product_costs").select("*");
+const { data: sellerOc } = await seller.db.from("order_costs").select("*");
+check("vendedor no lee product_costs ni order_costs", sellerPc?.length === 0 && sellerOc?.length === 0, `${sellerPc?.length}/${sellerOc?.length} filas`);
+const { data: sellerProducts } = await seller.db.from("products").select("*");
+check("products no trae la columna cost", sellerProducts?.length > 0 && sellerProducts.every((r) => !("cost" in r)));
+check("orders.items de una venta no tienen unitCost", o1?.items?.every((i) => !("unitCost" in i)));
+await expectError("vendedor no escribe product_costs", seller.db.from("product_costs").update({ cost: 0 }).eq("product_id", pA.id).select().single());
+const { data: ownerPc } = await ownerA.db.from("product_costs").select("*");
+check("dueño lee product_costs de su negocio", ownerPc?.length === 1 && ownerPc[0].product_id === pA.id && ownerPc[0].cost === 255, JSON.stringify(ownerPc));
+const { data: ownerOc } = await ownerA.db.from("order_costs").select("*").eq("order_id", o1.id).single();
+check("create_order ignora el unitCost del cliente y guarda el costo real", ownerOc?.costs?.[vkA] === 255, JSON.stringify(ownerOc?.costs));
+
 check("el folio es consecutivo dentro del negocio", sold?.folio === "V-1002", sold?.folio);
 const { error: cErr } = await ownerA.db.rpc("set_order_status", { p_order: sold.id, p_status: "cancelado" });
 const { data: st2 } = await ownerA.db.from("stock").select("qty").eq("variant_key", vkA).eq("branch", centro.id).single();
@@ -211,6 +186,7 @@ const quoteOf = (customer, product, vk) => ({
 });
 const { data: qA, error: qErr } = await seller.db.rpc("save_quote", { p: quoteOf(custA, pA, vkA) });
 check("folio de cotización del negocio", !qErr && qA?.folio === "COT-0001", qErr?.message ?? qA?.folio);
+check("save_quote guarda los items sin unitCost", qA?.items?.every((i) => !("unitCost" in i)));
 const { data: conv, error: convErr } = await seller.db.rpc("convert_quote", { p_quote: qA.id, p_deposit: { amount: 2954, method: "transferencia", note: "Anticipo" } });
 check("cotización → pedido apartado de mayoreo", !convErr && conv?.status === "apartado" && conv?.channel === "mayoreo", convErr?.message ?? conv?.status);
 check("el mayoreo se aparta de la sucursal que lo surte", conv?.branch === principalA.id);
@@ -253,9 +229,9 @@ check("kardex registra movimientos", (movs?.length ?? 0) >= 8, `${movs?.length} 
 const oldCode = bizA.invite_code;
 const { data: newCode, error: regenErr } = await ownerA.db.rpc("regenerate_invite_code");
 check("dueño renueva el código de invitación", !regenErr && /^[A-Z2-9]{8}$/.test(newCode ?? "") && newCode !== oldCode, regenErr?.message);
-const { data: oldLookup } = await anon.rpc("invite_lookup", { p_code: oldCode });
+const { data: oldLookup } = await inviteLookup(anon, oldCode);
 check("el código anterior deja de funcionar", oldLookup === null);
-const { data: stillB } = await anon.rpc("invite_lookup", { p_code: bizB.invite_code });
+const { data: stillB } = await inviteLookup(anon, bizB.invite_code);
 check("renovar el código de A no afecta a B", stillB === "Boutique Beta");
 
 // ---------------------------------------------------------------------------
@@ -263,10 +239,11 @@ check("renovar el código de A no afecta a B", stillB === "Boutique Beta");
 // ---------------------------------------------------------------------------
 const { data: pB, error: pBErr } = await ownerB.db
   .from("products")
-  .insert({ sku: "T-001", name: "Polo prueba", brand: "Marca", category: "Polos", cost: 100, price: 299, sizes: ["S", "M"], colors, woo_id: 1 })
+  .insert({ sku: "T-001", name: "Polo prueba", brand: "Marca", category: "Polos", price: 299, sizes: ["S", "M"], colors, woo_id: 1 })
   .select()
   .single();
 check("el mismo woo_id se puede usar en otro negocio", !pBErr, pBErr?.message);
+await ownerB.db.from("product_costs").insert({ product_id: pB.id, cost: 100 });
 const vkB = `${pB.id}|Negro|M`;
 check("producto de B solo crea filas de las sucursales de B", (await stockRows(ownerB.db, pB.id)) === 2);
 await ownerB.db.rpc("move_stock", { p_entries: [{ variantKey: vkB, qty: 10 }], p_branch: principalB.id, p_type: "entrada" });
@@ -295,7 +272,7 @@ for (const [who, db, own, other] of [
   ["B", ownerB.db, bizB.id, bizA.id],
   ["A", ownerA.db, bizA.id, bizB.id],
 ]) {
-  for (const table of ["businesses", "branches", "profiles", "settings", "products", "stock", "movements", "customers", "orders", "quotes", "expenses"]) {
+  for (const table of ["businesses", "branches", "profiles", "settings", "products", "stock", "movements", "customers", "orders", "quotes", "expenses", "product_costs", "order_costs"]) {
     const { data: rows, error } = await db.from(table).select("*");
     const idOf = (r) => (table === "businesses" ? r.id : r.business_id);
     check(`${who} solo lee filas de su negocio en ${table}`, !error && rows.length > 0 && rows.every((r) => idOf(r) === own) && !rows.some((r) => idOf(r) === other), error?.message ?? `${rows?.length} filas`);
@@ -303,6 +280,9 @@ for (const [who, db, own, other] of [
 }
 const { data: pFromB } = await ownerB.db.from("products").select("id").eq("id", pA.id);
 check("B no lee un producto de A por su id", pFromB?.length === 0);
+const { data: pcFromB } = await ownerB.db.from("product_costs").select("*").eq("product_id", pA.id);
+const { data: ocFromB } = await ownerB.db.from("order_costs").select("*").eq("order_id", o1.id);
+check("B no lee el costo de un producto ni de un pedido de A", pcFromB?.length === 0 && ocFromB?.length === 0);
 const { data: oFromB } = await ownerB.db.from("orders").select("id").eq("id", o1.id);
 check("B no lee un pedido de A por su id", oFromB?.length === 0);
 const { data: profFromB } = await ownerB.db.from("profiles").select("id").eq("id", seller.id);
@@ -342,7 +322,22 @@ await expectError("B no asigna sucursales de A a su equipo", ownerB.db.rpc("set_
 // Existencia de la principal de A: 20 de entrada − 12 de la conversión − 3 del traspaso
 const { data: afterStock } = await ownerA.db.from("stock").select("qty").eq("variant_key", vkA).eq("branch", principalA.id).single();
 const { data: oAfter } = await ownerA.db.from("orders").select("status").eq("id", o1.id).single();
-check("tras los intentos de B, el inventario y los pedidos de A siguen intactos", afterStock?.qty === 5 && oAfter?.status === "entregado", `qty=${afterStock?.qty} status=${oAfter?.status}`);
+check("tras los intentos de B, el inventario y los pedidos de A siguen intactos", afterStock?.qty === 5 && oAfter?.status === "pagado", `qty=${afterStock?.qty} status=${oAfter?.status}`);
+
+// ---------------------------------------------------------------------------
+// invite-lookup: máximo 30 intentos por IP (cf-connecting-ip) en 10 minutos
+// ---------------------------------------------------------------------------
+const limited = newClient(`test-${Date.now()}`);
+let answered = 0;
+for (let i = 0; i < 30; i++) if (!(await inviteLookup(limited, "ZZZZZZZZ")).error) answered++;
+check("invite-lookup responde las primeras 30 llamadas de una IP", answered === 30, `${answered} respuestas`);
+const over = await inviteLookup(limited, "ZZZZZZZZ", { "x-forwarded-for": `otra-${Date.now()}` });
+check("la llamada 31 se rechaza con 429 aunque cambie x-forwarded-for", over.error?.status === 429 && /Demasiados intentos/.test(over.error.message), over.error?.message ?? "no hubo error");
+const burst = newClient(`rafaga-${Date.now()}`);
+const burstAnswered = (await Promise.all(Array.from({ length: 40 }, () => inviteLookup(burst, "ZZZZZZZZ")))).filter((r) => !r.error).length;
+check("una ráfaga de 40 en paralelo responde solo 30", burstAnswered === 30, `${burstAnswered} respuestas`);
+const { data: otherKey, error: otherKeyErr } = await inviteLookup(newClient(`test-otra-${Date.now()}`), bizB.invite_code);
+check("otra IP sigue respondiendo", !otherKeyErr && otherKey === "Boutique Beta", otherKeyErr?.message);
 
 // ---------------------------------------------------------------------------
 // Logotipos: cada dueño escribe solo en la carpeta de su negocio
@@ -361,7 +356,4 @@ await expectDenied("B no borra el logotipo de A", ownerB.db.storage.from("logos"
 const { error: rmErr } = await ownerA.db.storage.from("logos").remove([`${bizA.id}/logo.png`]);
 check("dueño borra su propio logotipo", !rmErr, rmErr?.message);
 
-console.log(results.join("\n"));
-const failed = results.filter((r) => r.startsWith("✗")).length;
-console.log(`\n${results.length - failed}/${results.length} pruebas correctas`);
-process.exit(failed ? 1 : 0);
+report();

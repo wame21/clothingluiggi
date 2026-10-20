@@ -8,7 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import type { CatalogSettings } from "@/lib/settings";
 import { errorMessage, useErp } from "@/lib/store";
-import { Field, SaveBar } from "./fields";
+import { hasKeySeparator } from "@/lib/variants";
+import { Field, round, SaveBar } from "./fields";
 
 /** El formulario trabaja con las tallas como texto separado por comas y la curva en porcentajes. */
 interface Form {
@@ -16,8 +17,6 @@ interface Form {
   presets: { name: string; sizes: string }[];
   curve: Record<string, string>;
 }
-
-const round = (n: number, digits = 4) => Number(n.toFixed(digits));
 
 const parseSizes = (s: string) => [...new Set(s.split(",").map((x) => x.trim()).filter(Boolean))];
 
@@ -50,7 +49,9 @@ function validate(f: Form): string[] {
   const presetNames = f.presets.map((p) => p.name.trim().toLowerCase());
   f.presets.forEach((p, i) => {
     if (!p.name.trim()) errors.push(`El juego de tallas ${i + 1} necesita un nombre`);
-    if (parseSizes(p.sizes).length === 0) errors.push(`${p.name.trim() || `El juego de tallas ${i + 1}`} necesita al menos una talla`);
+    const nombre = p.name.trim() || `El juego de tallas ${i + 1}`;
+    if (parseSizes(p.sizes).length === 0) errors.push(`${nombre} necesita al menos una talla`);
+    if (parseSizes(p.sizes).some(hasKeySeparator)) errors.push(`${nombre} tiene una talla con el carácter «|»`);
   });
   if (new Set(presetNames.filter(Boolean)).size < presetNames.filter(Boolean).length) errors.push("Hay juegos de tallas repetidos");
   for (const s of curveSizes(f)) {

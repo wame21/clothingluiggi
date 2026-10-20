@@ -11,7 +11,7 @@ export function buildLineItems(q: QtyMap, products: Product[], unitPriceOf: (p: 
   for (const p of products)
     for (const c of p.colors)
       for (const size of p.sizes) {
-        const key = `${p.id}|${c.name}|${size}`;
+        const key = variantKey(p.id, c.name, size);
         const qty = q[key] ?? 0;
         if (qty > 0)
           items.push({
@@ -32,10 +32,8 @@ export function buildLineItems(q: QtyMap, products: Product[], unitPriceOf: (p: 
 export const variantKey = (productId: string, color: string, size: string) =>
   `${productId}|${color}|${size}`;
 
-export const parseVariantKey = (key: string) => {
-  const [productId, color, size] = key.split("|");
-  return { productId, color, size };
-};
+/** El "|" separa las partes de la llave de variante (y la arman los triggers SQL): no puede ir en colores ni tallas. */
+export const hasKeySeparator = (s: string) => s.includes("|");
 
 export const stockOf = (stock: StockMap, key: string, branch?: BranchId) => {
   const s = stock[key];
@@ -48,12 +46,6 @@ export function productStock(p: Product, stock: StockMap, branch?: BranchId) {
   for (const c of p.colors)
     for (const s of p.sizes) total += stockOf(stock, variantKey(p.id, c.name, s), branch);
   return total;
-}
-
-export function productVariants(p: Product) {
-  return p.colors.flatMap((c) =>
-    p.sizes.map((s) => ({ key: variantKey(p.id, c.name, s), color: c, size: s })),
-  );
 }
 
 export const uid = (prefix = "") =>

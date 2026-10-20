@@ -53,7 +53,7 @@ export default function PosPage() {
   const [ticket, setTicket] = useState<Order | null>(null);
   const [showCut, setShowCut] = useState(false);
 
-  const categories = [...new Set(products.map((p) => p.category))];
+  const categories = [...new Set(products.filter((p) => p.active).map((p) => p.category))];
   const list = products
     .filter((p) => p.active)
     .filter((p) => (cat === "all" ? true : p.category === cat))
