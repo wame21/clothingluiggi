@@ -12,9 +12,6 @@ import type { Business } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Field, SaveBar } from "./fields";
 
-const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
-const LOGO_MAX_BYTES = 2 * 1024 * 1024;
-
 /** Color que se muestra en el selector cuando el negocio no eligió uno. */
 const DEFAULT_ACCENT = "#b8892b";
 const ACCENTS = ["#b8892b", "#0f766e", "#1d4ed8", "#7c3aed", "#be123c", "#c2410c", "#15803d", "#334155"];
@@ -129,8 +126,6 @@ export function NegocioSection() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    if (!LOGO_TYPES.includes(file.type)) return toast.error("Usa una imagen PNG, JPG o WebP");
-    if (file.size > LOGO_MAX_BYTES) return toast.error("El logo pesa más de 2 MB; usa una imagen más ligera");
     setLogoBusy(true);
     try {
       await uploadLogo(file);
@@ -213,7 +208,7 @@ export function NegocioSection() {
             )}
           </div>
           <div className="flex flex-wrap gap-2">
-            <input ref={fileRef} type="file" accept={LOGO_TYPES.join(",")} className="hidden" onChange={(e) => void onLogo(e)} />
+            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => void onLogo(e)} />
             <Button variant="outline" className="h-9" disabled={logoBusy} onClick={() => fileRef.current?.click()}>
               {logoBusy ? <Loader2 className="animate-spin" /> : <ImagePlus />} {profile.logoUrl ? "Reemplazar logo" : "Subir logo"}
             </Button>

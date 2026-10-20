@@ -39,14 +39,14 @@ export function BrandMark({ className }: { className?: string }) {
   );
 }
 
-export function BrandLockup({ subtitle = APP_NAME }: { subtitle?: string }) {
+export function BrandLockup() {
   const name = useBusinessName();
   return (
     <div className="flex items-center gap-3">
       <BrandMark />
       <div className="min-w-0 leading-tight">
         <div className="truncate font-display text-xl font-semibold uppercase tracking-[0.18em] gold-text">{name}</div>
-        <div className="truncate text-[10px] uppercase tracking-[0.22em] text-sidebar-foreground/60">{subtitle}</div>
+        <div className="truncate text-[10px] uppercase tracking-[0.22em] text-sidebar-foreground/60">{APP_NAME}</div>
       </div>
     </div>
   );

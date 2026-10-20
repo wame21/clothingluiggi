@@ -130,7 +130,7 @@ export const wholesaleSnapshot = (): WholesaleSettings => ({
 
 /** Aplica la configuración guardada; se llama al cargar los datos, antes del primer render. */
 export function applyWholesaleSettings(s: WholesaleSettings) {
-  const next = wholesaleFrom(s);
+  const next = clone(wholesaleFrom(s));
   enabled = next.enabled;
   TIERS.splice(0, TIERS.length, ...[...next.tiers].sort((a, b) => a.minPieces - b.minPieces));
   DISTRIBUTOR_CUSTOMER_MIN = next.distributorCustomerMin;
@@ -174,9 +174,9 @@ export function nextTier(pieces: number, customerType?: CustomerType) {
   return { tier: next, missing: Math.max(0, min - pieces) };
 }
 
-/** Wholesale unit price rounded to the nearest $5 for clean price lists. */
+/** Wholesale unit price rounded to the nearest $5 for clean price lists; with no discount it is the list price as is. */
 export const tierPrice = (listPrice: number, tier: Tier) =>
-  Math.round((listPrice * (1 - tier.discount)) / 5) * 5;
+  tier.discount ? Math.round((listPrice * (1 - tier.discount)) / 5) * 5 : listPrice;
 
 /** Envío de un pedido mayorista: sin tarifa o sobre el mínimo de envío gratis, no se cobra. */
 export const shippingFor = (subtotal: number) =>

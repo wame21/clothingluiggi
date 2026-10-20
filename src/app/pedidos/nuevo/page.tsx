@@ -68,7 +68,6 @@ export default function NuevoPedidoPage() {
   const candidate = wholesaleOn && customer && customer.type !== "menudeo" ? tierFor(pieces, customer.type) : undefined;
   const distributorRule = DISTRIBUTOR_CUSTOMER_MIN > 0 && customer?.type === "distribuidor" && pieces >= DISTRIBUTOR_CUSTOMER_MIN;
   const tier = candidate && candidate.discount > 0 && (pieces >= candidate.minPieces || distributorRule) ? candidate : undefined;
-  const wholesale = !!tier;
   const unitPriceOf = (p: Product) => (tier ? tierPrice(p.price, tier) : p.price);
 
   const items = buildLineItems(qty, products, unitPriceOf);
@@ -96,7 +95,8 @@ export default function NuevoPedidoPage() {
       shipping,
       payments: paid > 0 ? [{ amount: paid, method, note: payMode === "anticipo" ? "Anticipo" : undefined }] : [],
       tierId: tier?.id,
-      notes: [shipMode === "recoge" ? "Recoge en sucursal" : "", notes].filter(Boolean).join(" · ") || undefined,
+      pickup: shipMode === "recoge",
+      notes: notes || undefined,
       shippingInfo: shipMode === "envio" && customer ? { carrier: carrier || undefined, city: [customer.city, customer.state].filter(Boolean).join(", ") } : undefined,
       });
       toast.success(`Pedido ${order.folio} creado · inventario actualizado`);
@@ -175,7 +175,7 @@ export default function NuevoPedidoPage() {
                   </SelectContent>
                 </Select>
               </div>
-              {wholesale && tier && customer && (
+              {tier && customer && (
                 <p className="rounded-lg bg-gold/10 px-3 py-2 text-xs text-gold md:col-span-2">
                   Cliente {customer.type} con {pieces} piezas: se aplica automáticamente el precio <b>{tier.name}</b> (−{Math.round(tier.discount * 100)}%). El pedido se registrará como Mayoreo.
                 </p>

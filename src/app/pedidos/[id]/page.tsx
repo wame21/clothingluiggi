@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { onlyDigits } from "@/lib/clabe";
 import { CUSTOMER_TYPE_LABEL, PAYMENT_LABEL, STATUS_LABEL } from "@/lib/constants";
 import { fDateTime, mxn, pct } from "@/lib/format";
 import { orderBalance, orderCost, orderFees, orderPaid } from "@/lib/metrics";
@@ -67,11 +68,11 @@ export default function PedidoDetalle() {
   const fees = orderFees(order);
   const net = order.subtotal - order.discount;
   const profit = net - cost - fees;
-  const pickup = order.notes?.includes("Recoge") ?? false;
+  const pickup = order.pickup;
   const rank = RANK[order.status];
   // Si el nivel ya no existe en la configuración, el pedido se muestra sin nivel.
   const tier = order.tierId ? TIERS.find((t) => t.id === order.tierId) : undefined;
-  const waPhone = customer ? `52${customer.phone.replace(/\D/g, "")}` : "";
+  const waPhone = customer ? `52${onlyDigits(customer.phone).slice(-10)}` : "";
   const waText = encodeURIComponent(
     `Hola ${customer?.name.split(" ")[0] ?? ""}, te saluda ${businessName}. Tu pedido ${order.folio} está: ${STATUS_LABEL[order.status]}.` +
       (order.shippingInfo?.tracking ? ` Guía${order.shippingInfo.carrier ? ` ${order.shippingInfo.carrier}` : ""}: ${order.shippingInfo.tracking}.` : "") +
@@ -270,12 +271,13 @@ export default function PedidoDetalle() {
             </CardContent>
           </Card>
 
-          {(order.shippingInfo || order.notes) && (
+          {(order.shippingInfo || order.notes || pickup) && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">Entrega</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-1 text-sm text-muted-foreground">
+                {pickup && <span>Recoge en sucursal</span>}
                 {order.shippingInfo?.city && <span>Destino: {order.shippingInfo.city}</span>}
                 {order.shippingInfo?.carrier && <span>Paquetería: {order.shippingInfo.carrier}</span>}
                 {order.shippingInfo?.tracking && (

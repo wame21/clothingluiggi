@@ -20,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { onlyDigits } from "@/lib/clabe";
 import { PAYMENT_LABEL } from "@/lib/constants";
 import { mxn } from "@/lib/format";
 import { errorMessage, useBusinessName, useErp, useWarehouse, useWholesaleEnabled } from "@/lib/store";
@@ -47,7 +48,7 @@ function CotizacionDetalle() {
   const pieces = quote.items.reduce((a, it) => a + it.qty, 0);
   const open = quote.status === "borrador" || quote.status === "enviada" || quote.status === "aceptada";
   const shortages = open && warehouse ? quote.items.filter((it) => it.qty > stockOf(stock, it.variantKey, warehouse.id)) : [];
-  const waPhone = customer ? `52${customer.phone.replace(/\D/g, "")}` : "";
+  const waPhone = customer ? `52${onlyDigits(customer.phone).slice(-10)}` : "";
   const waText = encodeURIComponent(
     `Hola ${customer?.name.split(" ")[0] ?? ""}, te comparto tu cotización ${quote.folio} de ${businessName}:\n` +
       `• ${pieces} piezas surtidas · precio ${tier.name}${tier.discount ? ` (−${Math.round(tier.discount * 100)}%)` : ""}\n` +

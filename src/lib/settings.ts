@@ -88,7 +88,7 @@ export const catalogFrom = (v: Json): CatalogSettings => {
   return {
     categories: Array.isArray(s.categories) ? s.categories : d.categories,
     sizePresets: Array.isArray(s.sizePresets) ? s.sizePresets : d.sizePresets,
-    sizeCurve: s.sizeCurve && typeof s.sizeCurve === "object" ? s.sizeCurve : d.sizeCurve,
+    sizeCurve: s.sizeCurve && typeof s.sizeCurve === "object" && !Array.isArray(s.sizeCurve) ? s.sizeCurve : d.sizeCurve,
   };
 };
 

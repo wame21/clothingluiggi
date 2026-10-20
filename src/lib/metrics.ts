@@ -47,22 +47,22 @@ export function periodRange(p: Period, now = new Date()): { cur: Range; prev: Ra
       const from = new Date(now.getFullYear(), now.getMonth(), 1);
       const pFrom = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const pTo = new Date(Math.min(
-        new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59).getTime(),
+        new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999).getTime(),
         new Date(now.getFullYear(), now.getMonth() - 1, now.getDate(), now.getHours(), now.getMinutes()).getTime(),
       ));
       return { cur: { from, to: now }, prev: { from: pFrom, to: pTo } };
     }
     case "mes_pasado": {
       const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const to = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+      const to = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
       return {
         cur: { from, to },
-        prev: { from: new Date(now.getFullYear(), now.getMonth() - 2, 1), to: new Date(now.getFullYear(), now.getMonth() - 1, 0, 23, 59, 59) },
+        prev: { from: new Date(now.getFullYear(), now.getMonth() - 2, 1), to: new Date(now.getFullYear(), now.getMonth() - 1, 0, 23, 59, 59, 999) },
       };
     }
     case "90d": {
       const from = new Date(sod(now).getTime() - 89 * DAY);
-      return { cur: { from, to: now }, prev: { from: new Date(from.getTime() - 90 * DAY), to: from } };
+      return { cur: { from, to: now }, prev: { from: new Date(from.getTime() - 90 * DAY), to: new Date(from.getTime() - 1) } };
     }
   }
 }
@@ -202,7 +202,7 @@ export function monthlySeries(data: Pick<ErpData, "orders" | "expenses">, months
   const out = [];
   for (let i = months - 1; i >= 0; i--) {
     const from = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const to = i === 0 ? now : new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+    const to = i === 0 ? now : new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59, 999);
     const p = pnl(data, { from, to });
     const label = from.toLocaleDateString("es-MX", { month: "short" }).replace(".", "");
     out.push({
@@ -223,23 +223,18 @@ export function productStats(orders: Order[], r: Range) {
   for (const o of orders) {
     if (!isSale(o) || !inRange(o.date, r)) continue;
     const share = o.subtotal ? (o.subtotal - o.discount) / o.subtotal : 1;
+    const seen = new Set<string>();
     for (const it of o.items) {
       const row = map.get(it.productId) ?? { units: 0, revenue: 0, cogs: 0, orders: 0 };
       row.units += it.qty;
       row.revenue += it.qty * it.unitPrice * share;
       row.cogs += it.qty * it.unitCost;
-      row.orders++;
+      if (!seen.has(it.productId)) {
+        seen.add(it.productId);
+        row.orders++;
+      }
       map.set(it.productId, row);
     }
-  }
-  return map;
-}
-
-export function sizeStats(orders: Order[], r: Range) {
-  const map = new Map<string, number>();
-  for (const o of orders) {
-    if (!isSale(o) || !inRange(o.date, r)) continue;
-    for (const it of o.items) map.set(it.size, (map.get(it.size) ?? 0) + it.qty);
   }
   return map;
 }

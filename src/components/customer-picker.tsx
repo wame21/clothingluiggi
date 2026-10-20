@@ -44,6 +44,7 @@ export function NewCustomerDialog({
   const city = useErp((s) => s.profileSettings.city);
   const empty = { name: "", business: "", phone: "", city, state: "", type: defaultType, instagram: "", rfc: "" };
   const [form, setForm] = useState(empty);
+  const [saving, setSaving] = useState(false);
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   const submit = () => {
@@ -51,6 +52,8 @@ export function NewCustomerDialog({
       toast.error("Nombre y teléfono son obligatorios");
       return;
     }
+    if (saving) return;
+    setSaving(true);
     addCustomer({
       name: form.name.trim(),
       business: form.business.trim() || undefined,
@@ -67,7 +70,8 @@ export function NewCustomerDialog({
         setOpen(false);
         setForm(empty);
       })
-      .catch((e) => toast.error(errorMessage(e)));
+      .catch((e) => toast.error(errorMessage(e)))
+      .finally(() => setSaving(false));
   };
 
   return (
@@ -133,7 +137,9 @@ export function NewCustomerDialog({
           <Button variant="outline" onClick={() => setOpen(false)}>
             Cancelar
           </Button>
-          <Button onClick={submit}>Guardar cliente</Button>
+          <Button onClick={submit} disabled={saving}>
+            Guardar cliente
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -223,7 +229,7 @@ export function CustomerSelect({
       </Popover>
       <NewCustomerDialog
         defaultType={wholesaleOnly ? "mayorista" : "menudeo"}
-        onCreated={(c) => onChange(c)}
+        onCreated={onChange}
         trigger={
           <Button variant="outline" size="icon" className="size-10" aria-label="Nuevo cliente">
             <UserPlus />

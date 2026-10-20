@@ -12,12 +12,12 @@ import {
 import { useMemo } from "react";
 import { CHANNEL_COLOR, CHANNEL_LABEL, CHANNELS as ALL_CHANNELS } from "@/lib/constants";
 import { fDay, mxn, mxnShort, num } from "@/lib/format";
-import type { DailyRow } from "@/lib/metrics";
+import type { DailyRow, monthlySeries } from "@/lib/metrics";
 import { useChannels } from "@/lib/store";
 
 const AXIS = { fontSize: 11, fill: "var(--muted-foreground)" };
 
-export function Legend({ items }: { items: { label: string; color: string }[] }) {
+function Legend({ items }: { items: { label: string; color: string }[] }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
       {items.map((i) => (
@@ -59,7 +59,7 @@ function TooltipBox({ title, rows }: { title: string; rows: TipRow[] }) {
 /* ------------------------------------------------------------------ */
 /* Ventas diarias apiladas por canal                                    */
 /* ------------------------------------------------------------------ */
-export function ChannelStackedBars({ data, height = 260 }: { data: DailyRow[]; height?: number }) {
+export function ChannelStackedBars({ data }: { data: DailyRow[] }) {
   const active = useChannels();
   // Un canal desactivado con ventas históricas se sigue mostrando para que el total cuadre
   const CHANNELS = useMemo(
@@ -70,7 +70,7 @@ export function ChannelStackedBars({ data, height = 260 }: { data: DailyRow[]; h
   return (
     <div className="flex flex-col gap-3">
       <Legend items={CHANNELS.map((c) => ({ label: CHANNEL_LABEL[c], color: CHANNEL_COLOR[c] }))} />
-      <div style={{ height }}>
+      <div style={{ height: 260 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 4, right: 4, left: -8, bottom: 0 }} barCategoryGap="18%">
             <CartesianGrid vertical={false} stroke="var(--border)" />
@@ -122,23 +122,13 @@ export function ChannelStackedBars({ data, height = 260 }: { data: DailyRow[]; h
 /* ------------------------------------------------------------------ */
 /* Ingresos vs egresos vs utilidad por mes                              */
 /* ------------------------------------------------------------------ */
-export interface MonthRow {
-  month: string;
-  partial: boolean;
-  ingresos: number;
-  costo: number;
-  gastos: number;
-  utilidad: number;
-  margen: number;
-}
-
 const FIN = [
   { key: "ingresos", label: "Ingresos", color: "var(--ch-tienda)" },
   { key: "egresos", label: "Costo de mercancía + gastos", color: "color-mix(in oklch, var(--muted-foreground) 55%, transparent)" },
   { key: "utilidad", label: "Utilidad operativa", color: "var(--ch-web)" },
 ] as const;
 
-export function FinanceBars({ data, height = 280 }: { data: MonthRow[]; height?: number }) {
+export function FinanceBars({ data, height = 280 }: { data: ReturnType<typeof monthlySeries>; height?: number }) {
   const rows = data.map((d) => ({ ...d, egresos: d.costo + d.gastos, label: d.partial ? `${d.month}*` : d.month }));
   return (
     <div className="flex flex-col gap-3">
@@ -184,17 +174,14 @@ export function FinanceBars({ data, height = 280 }: { data: MonthRow[]; height?:
 export function SimpleBars({
   data,
   height = 220,
-  unit = "pzs",
-  color = "var(--ch-tienda)",
   format,
 }: {
   data: { label: string; value: number; hint?: string }[];
   height?: number;
-  unit?: string;
-  color?: string;
   format?: (v: number) => string;
 }) {
-  const fmt = format ?? ((v: number) => `${num(v)} ${unit}`);
+  const color = "var(--ch-tienda)";
+  const fmt = format ?? ((v: number) => `${num(v)} pzs`);
   return (
     <div style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">

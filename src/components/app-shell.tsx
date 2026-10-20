@@ -72,7 +72,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
   },
 ];
 
-const OWNER_ONLY = ["/finanzas", "/reportes", "/equipo", "/configuracion"];
+const OWNER_ONLY = NAV.flatMap((g) => g.items).filter((i) => i.ownerOnly).map((i) => i.href);
 /** Rutas que se muestran sin el menú lateral ni la carga de datos. */
 const BARE_PATHS = ["/login"];
 
