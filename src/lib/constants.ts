@@ -2,6 +2,7 @@ import type {
   Channel,
   CustomerType,
   ExpenseCategory,
+  ModuleKey,
   OrderStatus,
   PaymentMethod,
   QuoteStatus,
@@ -76,7 +77,21 @@ export const EXPENSE_LABEL: Record<ExpenseCategory, string> = {
 };
 
 export const CUSTOMER_TYPE_LABEL: Record<CustomerType, string> = {
-  menudeo: "Menudeo",
+  menudeo: "Minorista",
   mayorista: "Mayorista",
   distribuidor: "Distribuidor",
+};
+
+/** shortcut: datos de pago fijos en código; moverlos a la base si cambian seguido */
+export const SUPPORT_PAYMENT = { bank: "", clabe: "", holder: "", whatsapp: "" };
+
+export const MODULE_LABEL: Record<ModuleKey, string> = {
+  panel: "Panel general",
+  pos: "Punto de venta",
+  pedidos: "Pedidos",
+  inventario: "Inventario",
+  clientes: "Clientes",
+  mayoreo: "Mayoreo",
+  finanzas: "Finanzas",
+  reportes: "Reportes",
 };

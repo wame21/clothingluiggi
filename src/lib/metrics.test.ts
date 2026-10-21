@@ -4,6 +4,7 @@ import {
   SALE_STATUSES,
   breakEven,
   byChannel,
+  customerStats,
   dailySeries,
   expensesByCategory,
   expensesIn,
@@ -23,11 +24,14 @@ import {
   receivables,
   replenishment,
   salesSummary,
+  wholesaleBuyers,
+  wholesaleMonthly,
   type Period,
   type Range,
 } from "@/lib/metrics";
 import { DEFAULT_SALES, applySalesSettings } from "@/lib/settings";
 import type {
+  Customer,
   Expense,
   LineItem,
   Order,
@@ -931,5 +935,105 @@ describe("listas vacías", () => {
       const { cur, prev } = periodRange(p, NOW);
       for (const d of [cur.from, cur.to, prev.from, prev.to]) expect(Number.isNaN(d.getTime())).toBe(false);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Clientes y mayoreo                                                   */
+/* ------------------------------------------------------------------ */
+const customer = (o: Partial<Customer> = {}): Customer => ({
+  id: nextId("c"),
+  name: "Ana",
+  phone: "5512345678",
+  city: "CDMX",
+  state: "CDMX",
+  type: "mayorista",
+  since: iso(2026, 1, 1),
+  ...o,
+});
+
+describe("customerStats", () => {
+  it("sin clientes o sin pedidos devuelve vacío y ceros", () => {
+    expect(customerStats([], [order()])).toEqual([]);
+    const [row] = customerStats([customer({ id: "c1" })], []);
+    expect(row).toMatchObject({ orders: [], total: 0, balance: 0, last: undefined });
+  });
+
+  it("ignora cancelados y pedidos sin cliente, suma saldo y ordena por total", () => {
+    const chico = customer({ id: "chico" });
+    const grande = customer({ id: "grande" });
+    const orders = [
+      order({ customerId: "chico", date: iso(2026, 10, 1), items: [item({ unitPrice: 100 })] }),
+      order({ customerId: "grande", date: iso(2026, 9, 1), items: [item({ unitPrice: 900 })], payments: [pay(400)] }),
+      order({ customerId: "grande", date: iso(2026, 10, 5), items: [item({ unitPrice: 300 })] }),
+      order({ customerId: "grande", status: "cancelado", items: [item({ unitPrice: 9999 })] }),
+      order({ items: [item({ unitPrice: 9999 })] }),
+    ];
+    const [a, b] = customerStats([chico, grande], orders);
+    expect(a.customer.id).toBe("grande");
+    expect(a).toMatchObject({ total: 1200, balance: 800, last: iso(2026, 10, 5) });
+    expect(a.orders).toHaveLength(2);
+    expect(b).toMatchObject({ total: 100, balance: 100 });
+  });
+});
+
+describe("wholesaleBuyers", () => {
+  const r: Range = { from: at(2026, 10, 1, 0), to: at(2026, 10, 31, 23, 59, 59) };
+  const mayorista = customer({ id: "m", type: "mayorista" });
+  const distribuidor = customer({ id: "d", type: "distribuidor" });
+  const minorista = customer({ id: "r", type: "menudeo" });
+  const venta = (customerId: string, o: Partial<Order> = {}) =>
+    order({ customerId, channel: "mayoreo", date: iso(2026, 10, 10), items: [item({ unitPrice: 1000 })], ...o });
+
+  it("sin pedidos lista a los mayoristas con cero y excluye a los de menudeo", () => {
+    const rows = wholesaleBuyers([mayorista, distribuidor, minorista], [], r);
+    expect(rows.map((x) => x.customer.id).sort()).toEqual(["d", "m"]);
+    expect(rows.every((x) => x.revenue === 0 && x.periodOrders === 0)).toBe(true);
+  });
+
+  it("cuenta solo ventas de mayoreo del periodo; cancelados y no pagados no suman", () => {
+    const orders = [
+      venta("m"),
+      venta("m", { status: "cancelado" }),
+      venta("m", { status: "pendiente" }),
+      venta("m", { channel: "tienda" }),
+      venta("d", { items: [item({ unitPrice: 3000 })], shipping: 100 }),
+      venta("d", { date: iso(2026, 9, 30, 23, 59) }),
+    ];
+    const [primero, segundo] = wholesaleBuyers([mayorista, distribuidor], orders, r);
+    expect(primero).toMatchObject({ revenue: 3100, periodOrders: 1 });
+    expect(primero.customer.id).toBe("d");
+    expect(segundo).toMatchObject({ revenue: 1000, periodOrders: 1 });
+  });
+
+  it("el saldo y la última compra incluyen todo lo no cancelado, no solo el periodo", () => {
+    const [row] = wholesaleBuyers([mayorista], [venta("m", { date: iso(2026, 8, 1), status: "apartado" })], r);
+    expect(row).toMatchObject({ revenue: 0, periodOrders: 0, balance: 1000, last: iso(2026, 8, 1) });
+  });
+});
+
+describe("wholesaleMonthly", () => {
+  const AHORA = at(2026, 10, 20);
+  const venta = (date: string, o: Partial<Order> = {}) => order({ channel: "mayoreo", date, items: [item({ unitPrice: 500 })], ...o });
+
+  it("sin pedidos devuelve 6 meses en cero y solo el actual es parcial", () => {
+    const rows = wholesaleMonthly([], 6, AHORA);
+    expect(rows).toHaveLength(6);
+    expect(rows.every((x) => x.revenue === 0)).toBe(true);
+    expect(rows.map((x) => x.partial)).toEqual([false, false, false, false, false, true]);
+    expect(rows[5].month).toBe("Oct");
+  });
+
+  it("respeta el borde de mes, ignora otros canales y cancelados y corta lo posterior a now", () => {
+    const orders = [
+      venta(iso(2026, 9, 30, 23, 59)),
+      venta(iso(2026, 10, 1, 0, 0)),
+      venta(iso(2026, 10, 25), { items: [item({ unitPrice: 9999 })] }),
+      venta(iso(2026, 10, 2), { status: "cancelado" }),
+      venta(iso(2026, 10, 3), { channel: "tienda" }),
+      venta(iso(2026, 4, 30, 23, 59)),
+    ];
+    const rows = wholesaleMonthly(orders, 6, AHORA);
+    expect(rows.map((x) => x.revenue)).toEqual([0, 0, 0, 0, 500, 500]);
   });
 });

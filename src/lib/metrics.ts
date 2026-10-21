@@ -2,6 +2,7 @@ import { CHANNELS } from "./constants";
 import { paymentFee } from "./settings";
 import type {
   Channel,
+  Customer,
   ErpData,
   Expense,
   ExpenseCategory,
@@ -198,16 +199,22 @@ export function dailySeries(orders: Order[], r: Range): DailyRow[] {
   return Object.values(days);
 }
 
+/** Calendar month `i` months back (0 = current, cut at `now`) with its short capitalized label. */
+function monthBucket(i: number, now: Date) {
+  const from = new Date(now.getFullYear(), now.getMonth() - i, 1);
+  const to = i === 0 ? now : new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59, 999);
+  const label = from.toLocaleDateString("es-MX", { month: "short" }).replace(".", "");
+  return { range: { from, to }, month: label.charAt(0).toUpperCase() + label.slice(1), partial: i === 0 };
+}
+
 export function monthlySeries(data: Pick<ErpData, "orders" | "expenses">, months = 4, now = new Date()) {
   const out = [];
   for (let i = months - 1; i >= 0; i--) {
-    const from = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const to = i === 0 ? now : new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59, 999);
-    const p = pnl(data, { from, to });
-    const label = from.toLocaleDateString("es-MX", { month: "short" }).replace(".", "");
+    const { range, month, partial } = monthBucket(i, now);
+    const p = pnl(data, range);
     out.push({
-      month: label.charAt(0).toUpperCase() + label.slice(1),
-      partial: i === 0,
+      month,
+      partial,
       ingresos: p.revenue,
       costo: p.cogs,
       gastos: p.opex + p.fees,
@@ -241,6 +248,49 @@ export function productStats(orders: Order[], r: Range) {
 
 export const receivables = (orders: Order[]) =>
   orders.filter((o) => o.status !== "cancelado" && orderBalance(o) > 0);
+
+/* ------------------------------------------------------------------ */
+/* Clientes y mayoreo                                                   */
+/* ------------------------------------------------------------------ */
+/** Per customer: non-cancelled orders (newest first), billed total, open balance and last purchase. Biggest buyer first. */
+export function customerStats(customers: Customer[], orders: Order[]) {
+  const byCustomer = new Map<string, Order[]>();
+  for (const o of orders) if (o.customerId && o.status !== "cancelado") byCustomer.set(o.customerId, [...(byCustomer.get(o.customerId) ?? []), o]);
+  return customers
+    .map((customer) => {
+      const list = (byCustomer.get(customer.id) ?? []).sort((a, b) => b.date.localeCompare(a.date));
+      return {
+        customer,
+        orders: list,
+        total: list.reduce((a, o) => a + o.total, 0),
+        balance: list.reduce((a, o) => a + orderBalance(o), 0),
+        last: list[0]?.date,
+      };
+    })
+    .sort((a, b) => b.total - a.total);
+}
+
+/** Wholesale sale = a recognized sale in the `mayoreo` channel (same definition as the page KPI). */
+export const wholesaleOrders = (orders: Order[]) => orders.filter((o) => o.channel === "mayoreo");
+
+/** Mayorista/distribuidor customers with their wholesale revenue and order count in `r`, biggest first. */
+export function wholesaleBuyers(customers: Customer[], orders: Order[], r: Range) {
+  return customerStats(customers.filter((c) => c.type !== "menudeo"), orders)
+    .map((s) => {
+      const sales = salesSummary(wholesaleOrders(s.orders), r);
+      return { ...s, revenue: sales.revenue, periodOrders: sales.orders };
+    })
+    .sort((a, b) => b.revenue - a.revenue);
+}
+
+/** Wholesale revenue for each of the last `months` calendar months (the current one is partial). */
+export function wholesaleMonthly(orders: Order[], months = 6, now = new Date()) {
+  const wholesale = wholesaleOrders(orders);
+  return Array.from({ length: months }, (_, k) => {
+    const { range, month, partial } = monthBucket(months - 1 - k, now);
+    return { month, partial, revenue: salesSummary(wholesale, range).revenue };
+  });
+}
 
 /* ------------------------------------------------------------------ */
 /* Inventario                                                           */

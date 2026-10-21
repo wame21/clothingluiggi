@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  AlertTriangle,
+  Ban,
   BarChart3,
   Boxes,
   FileText,
@@ -10,7 +12,6 @@ import {
   LogOut,
   Menu,
   Moon,
-  Plug,
   RefreshCw,
   Settings,
   ShoppingBag,
@@ -26,7 +27,9 @@ import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState, type ReactNode } from "react";
 import { BrandLockup, BrandMark } from "@/components/brand";
+import { PaymentInfo } from "@/components/payment-info";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,7 +39,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { mxn } from "@/lib/format";
+import { graceNotice, hasModule, minPlanFor, needsPayment, PLAN_NAMES } from "@/lib/membership";
 import { useBusinessName, useErp, useWholesaleEnabled } from "@/lib/store";
+import type { ModuleKey } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -45,6 +51,8 @@ interface NavItem {
   icon: typeof LayoutDashboard;
   ownerOnly?: boolean;
   wholesaleOnly?: boolean;
+  /** Módulo del plan que lo habilita; sin él, siempre disponible (Equipo, Configuración). */
+  module?: ModuleKey;
   badge?: "orders" | "quotes";
 }
 
@@ -52,29 +60,31 @@ const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: "Operación",
     items: [
-      { href: "/", label: "Panel general", icon: LayoutDashboard },
-      { href: "/pedidos", label: "Pedidos", icon: ShoppingBag, badge: "orders" },
-      { href: "/pos", label: "Punto de venta", icon: Store },
-      { href: "/inventario", label: "Inventario", icon: Boxes },
-      { href: "/mayoreo", label: "Mayoreo", icon: FileText, badge: "quotes", wholesaleOnly: true },
-      { href: "/clientes", label: "Clientes", icon: Users },
+      { href: "/", label: "Panel general", icon: LayoutDashboard, module: "panel" },
+      { href: "/pedidos", label: "Pedidos", icon: ShoppingBag, badge: "orders", module: "pedidos" },
+      { href: "/pos", label: "Punto de venta", icon: Store, module: "pos" },
+      { href: "/inventario", label: "Inventario", icon: Boxes, module: "inventario" },
+      { href: "/mayoreo", label: "Mayoreo", icon: FileText, badge: "quotes", wholesaleOnly: true, module: "mayoreo" },
+      { href: "/clientes", label: "Clientes", icon: Users, module: "clientes" },
     ],
   },
   {
     section: "Negocio",
     items: [
-      { href: "/finanzas", label: "Finanzas", icon: Wallet, ownerOnly: true },
-      { href: "/reportes", label: "Reportes", icon: BarChart3, ownerOnly: true },
+      { href: "/finanzas", label: "Finanzas", icon: Wallet, ownerOnly: true, module: "finanzas" },
+      // shortcut: Reportes se calcula en el navegador con datos propios; bloquear en servidor si se vuelve un cálculo del servidor
+      { href: "/reportes", label: "Reportes", icon: BarChart3, ownerOnly: true, module: "reportes" },
       { href: "/equipo", label: "Equipo", icon: UserCog, ownerOnly: true },
       { href: "/configuracion", label: "Configuración", icon: Settings, ownerOnly: true },
-      { href: "/integraciones", label: "Integraciones", icon: Plug },
     ],
   },
 ];
 
-const OWNER_ONLY = NAV.flatMap((g) => g.items).filter((i) => i.ownerOnly).map((i) => i.href);
+const NAV_ITEMS = NAV.flatMap((g) => g.items);
+const OWNER_ONLY = NAV_ITEMS.filter((i) => i.ownerOnly).map((i) => i.href);
 /** Rutas que se muestran sin el menú lateral ni la carga de datos. */
-const BARE_PATHS = ["/login"];
+const BARE_PATHS = ["/login", "/admin"];
+const isActive = (href: string, pathname: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 
@@ -145,6 +155,8 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const role = useErp((s) => s.role);
   const wholesale = useWholesaleEnabled();
   const badges = useNavBadges();
+  const membership = useErp((s) => s.membership);
+  const plans = useErp((s) => s.plans);
 
   return (
     <nav className="flex flex-col gap-6">
@@ -153,9 +165,10 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           <div className="px-3 pb-1 text-[10px] font-medium uppercase tracking-[0.2em] text-sidebar-foreground/40">
             {group.section}
           </div>
-          {group.items.filter((item) => wholesale || !item.wholesaleOnly).map((item) => {
-            const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+          {group.items.filter((item) => wholesale || !item.wholesaleOnly || (item.module && !hasModule(membership, item.module))).map((item) => {
+            const active = isActive(item.href, pathname);
             const locked = item.ownerOnly && role !== "dueno";
+            const upgrade = item.module && !hasModule(membership, item.module) ? minPlanFor(plans, item.module) : undefined;
             const count = item.badge ? badges[item.badge] : 0;
             return (
               <Link
@@ -165,13 +178,17 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
                 className={cn(
                   "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                   active && "bg-sidebar-accent text-sidebar-accent-foreground",
-                  locked && "opacity-50",
+                  (locked || upgrade) && "opacity-50",
                 )}
               >
                 <item.icon className={cn("size-4 shrink-0", active ? "text-sidebar-primary" : "text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80")} />
                 <span className="flex-1 truncate">{item.label}</span>
                 {locked ? (
                   <Lock className="size-3.5 text-sidebar-foreground/40" />
+                ) : upgrade ? (
+                  <span className="flex items-center gap-1 text-[11px] text-sidebar-foreground/60">
+                    <Lock className="size-3.5 text-sidebar-foreground/40" /> Plan {upgrade.name}
+                  </span>
                 ) : count > 0 ? (
                   <span className="rounded-full bg-sidebar-primary/15 px-1.5 py-px text-[11px] font-medium tabular text-sidebar-primary">
                     {count}
@@ -267,6 +284,56 @@ function Restricted() {
   );
 }
 
+function Upgrade({ plan }: { plan: string }) {
+  return (
+    <div className="mx-auto mt-24 flex max-w-md flex-col items-center gap-4 text-center">
+      <div className="grid size-14 place-items-center rounded-full bg-muted">
+        <Lock className="size-6 text-muted-foreground" />
+      </div>
+      <h2 className="text-xl font-semibold">Disponible en el plan {plan}</h2>
+      <p className="text-sm text-muted-foreground">El dueño puede mejorar el plan en Configuración → Membresía. Tus datos se conservan.</p>
+    </div>
+  );
+}
+
+/** Aviso de pago pendiente (gracia o últimos 3 días de prueba) o de plan vencido: diálogo al cargar la app y banner fijo. */
+function MembershipNotice() {
+  const m = useErp((s) => s.membership);
+  const plans = useErp((s) => s.plans);
+  const [open, setOpen] = useState(true);
+  if (!m) return null;
+
+  const pay = needsPayment(m);
+  if (!pay && m.state !== "vencida") return null;
+
+  const plan = PLAN_NAMES[m.plan];
+  const text = pay
+    ? `${graceNotice(m, plans)} Monto del plan ${plan}: ${mxn(m.price)}.`
+    : `Estás en Lite porque tu plan venció; paga ${mxn(m.price)} para recuperar ${plan}.`;
+  return (
+    <>
+      <div role="status" className="flex items-start gap-2 bg-amber-100 px-4 py-2 text-xs text-amber-950 dark:bg-amber-950 dark:text-amber-100 md:px-6">
+        <AlertTriangle className="mt-px size-3.5 shrink-0" />
+        <span>{text}</span>
+      </div>
+      {pay && (
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Registra tu pago</DialogTitle>
+              <DialogDescription>{text}</DialogDescription>
+            </DialogHeader>
+            <PaymentInfo />
+            <DialogFooter>
+              <Button onClick={() => setOpen(false)}>Entendido</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
+  );
+}
+
 function FullScreen({ children }: { children: ReactNode }) {
   return (
     <div className="grid min-h-screen place-items-center bg-background px-4">
@@ -282,6 +349,7 @@ function DataGate({ children }: { children: ReactNode }) {
   const profile = useErp((s) => s.profile);
   const init = useErp((s) => s.init);
   const signOut = useErp((s) => s.signOut);
+  const membership = useErp((s) => s.membership);
 
   useEffect(() => {
     void init();
@@ -334,15 +402,42 @@ function DataGate({ children }: { children: ReactNode }) {
     );
   }
 
+  if (membership?.state === "suspendida") {
+    return (
+      <FullScreen>
+        <Ban className="size-8 text-destructive" />
+        <h2 className="text-xl font-semibold">Cuenta suspendida</h2>
+        {membership.suspendedReason && <p className="text-sm text-muted-foreground">{membership.suspendedReason}</p>}
+        <p className="text-sm text-muted-foreground">
+          Tus datos se conservan. Para reactivarla, registra el pago de tu plan {PLAN_NAMES[membership.plan]}
+          {membership.price > 0 && ` (${mxn(membership.price)})`}.
+        </p>
+        <PaymentInfo />
+        <div className="flex gap-2">
+          <Button onClick={() => void init()}>
+            <RefreshCw /> Revisar de nuevo
+          </Button>
+          <Button variant="outline" onClick={() => void signOut()}>
+            <LogOut /> Cerrar sesión
+          </Button>
+        </div>
+      </FullScreen>
+    );
+  }
+
   return <>{children}</>;
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const role = useErp((s) => s.role);
+  const membership = useErp((s) => s.membership);
+  const plans = useErp((s) => s.plans);
   const businessName = useBusinessName();
   const [open, setOpen] = useState(false);
   const locked = role !== "dueno" && OWNER_ONLY.some((p) => pathname.startsWith(p));
+  const gated = NAV_ITEMS.find((i) => i.module && isActive(i.href, pathname))?.module;
+  const upgrade = membership && gated && !hasModule(membership, gated) ? minPlanFor(plans, gated) : undefined;
 
   if (BARE_PATHS.includes(pathname)) return <>{children}</>;
 
@@ -354,29 +449,32 @@ export function AppShell({ children }: { children: ReactNode }) {
           <SidebarBody />
         </aside>
         <div className="lg:pl-64">
-          <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur print:hidden md:px-6">
-            <Sheet open={open} onOpenChange={setOpen}>
-              <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Abrir menú">
-                  <Menu />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-72 border-sidebar-border p-0" showCloseButton={false}>
-                <SheetTitle className="sr-only">Menú</SheetTitle>
-                <SidebarBody onNavigate={() => setOpen(false)} />
-              </SheetContent>
-            </Sheet>
-            <div className="flex min-w-0 items-center gap-2 lg:hidden">
-              <BrandMark className="size-7 text-xs" />
-              <span className="truncate font-display text-lg font-semibold uppercase tracking-[0.16em]">{businessName}</span>
-            </div>
-            <div className="ml-auto flex items-center gap-1.5">
-              <ThemeToggle />
-              <UserMenu />
-            </div>
-          </header>
+          <div className="sticky top-0 z-20 print:hidden">
+            <MembershipNotice />
+            <header className="flex h-14 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur md:px-6">
+              <Sheet open={open} onOpenChange={setOpen}>
+                <SheetTrigger asChild>
+                  <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Abrir menú">
+                    <Menu />
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="w-72 border-sidebar-border p-0" showCloseButton={false}>
+                  <SheetTitle className="sr-only">Menú</SheetTitle>
+                  <SidebarBody onNavigate={() => setOpen(false)} />
+                </SheetContent>
+              </Sheet>
+              <div className="flex min-w-0 items-center gap-2 lg:hidden">
+                <BrandMark className="size-7 text-xs" />
+                <span className="truncate font-display text-lg font-semibold uppercase tracking-[0.16em]">{businessName}</span>
+              </div>
+              <div className="ml-auto flex items-center gap-1.5">
+                <ThemeToggle />
+                <UserMenu />
+              </div>
+            </header>
+          </div>
           <main className="mx-auto w-full max-w-[1400px] px-4 py-6 md:px-6 md:py-8">
-            {locked ? <Restricted /> : children}
+            {locked ? <Restricted /> : upgrade ? <Upgrade plan={upgrade.name} /> : children}
           </main>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/erp";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CatalogoSection } from "./_components/catalogo";
 import { MayoreoSection } from "./_components/mayoreo";
+import { MembresiaSection } from "./_components/membresia";
 import { NegocioSection } from "./_components/negocio";
 import { SucursalesSection } from "./_components/sucursales";
 import { VentasSection } from "./_components/ventas";
@@ -14,6 +15,7 @@ const SECTIONS = [
   { value: "catalogo", label: "Catálogo", Section: CatalogoSection },
   { value: "ventas", label: "Ventas", Section: VentasSection },
   { value: "mayoreo", label: "Mayoreo", Section: MayoreoSection },
+  { value: "membresia", label: "Membresía", Section: MembresiaSection },
 ];
 
 export default function ConfiguracionPage() {

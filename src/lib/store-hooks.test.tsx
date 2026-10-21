@@ -16,7 +16,7 @@ import {
   useWarehouse,
   useWholesaleEnabled,
 } from "@/lib/store";
-import type { Branch } from "@/lib/types";
+import type { Branch, Membership } from "@/lib/types";
 import { applyWholesaleSettings, DEFAULT_WHOLESALE } from "@/lib/wholesale";
 
 const upsert = vi.hoisted(() => vi.fn(() => ({ select: () => ({ single: async () => ({ data: {}, error: null }) }) })));
@@ -42,8 +42,20 @@ const BRANCHES: Branch[] = [
 
 const INITIAL = useErp.getState();
 
+const PRO: Membership = {
+  plan: "pro",
+  effectivePlan: "pro",
+  state: "activa",
+  trialEndsAt: null,
+  paidUntil: null,
+  graceEndsAt: null,
+  modules: ["panel", "mayoreo"],
+  price: 0,
+  suspendedReason: null,
+};
+
 beforeEach(() => {
-  useErp.setState(INITIAL, true);
+  useErp.setState({ ...INITIAL, membership: PRO }, true);
   applyWholesaleSettings(DEFAULT_WHOLESALE);
   upsert.mockClear();
 });
@@ -140,6 +152,12 @@ describe("mayoreo, canales y categorías", () => {
     expect(view.result.current).toBe(false);
     act(() => useErp.setState({ wholesale: { ...DEFAULT_WHOLESALE, enabled: true } }));
     expect(view.result.current).toBe(true);
+  });
+
+  it("useWholesaleEnabled exige además que el plan incluya Mayoreo", () => {
+    const { view } = hook(useWholesaleEnabled);
+    act(() => useErp.setState({ wholesale: { ...DEFAULT_WHOLESALE, enabled: true }, membership: { ...PRO, modules: ["panel"] } }));
+    expect(view.result.current).toBe(false);
   });
 
   it("useChannels excluye mayoreo si el módulo está apagado, aunque esté en la lista", () => {

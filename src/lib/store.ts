@@ -5,6 +5,7 @@ import { useCallback, useMemo } from "react";
 import { create } from "zustand";
 import { activeBranches, applyBranches, posBranches, warehouseOf } from "./branches";
 import { APP_NAME } from "./constants";
+import { hasModule } from "./membership";
 import {
   applyCatalogSettings,
   applySalesSettings,
@@ -26,11 +27,13 @@ import type {
   ErpData,
   Expense,
   LineItem,
+  Membership,
   Movement,
   MovementType,
   Order,
   OrderStatus,
   Payment,
+  Plan,
   Product,
   Profile,
   Quote,
@@ -145,6 +148,10 @@ interface Session {
   team: Profile[];
   /** Conectado al canal de tiempo real. */
   live: boolean;
+  /** `my_membership()`; `null` hasta que carga (o si la cuenta está pendiente). */
+  membership: Membership | null;
+  /** Catálogo `plans`, ordenado por `sort`. */
+  plans: Plan[];
 }
 
 type Data = ErpData & Config;
@@ -177,6 +184,8 @@ const toBusiness = (r: Row): Business => ({
   orderPrefix: r.order_prefix,
   quotePrefix: r.quote_prefix,
 });
+
+const toPlan = (r: Row): Plan => ({ id: r.id, name: r.name, price: num(r.price_monthly), modules: r.modules });
 
 const toBranch = (r: Row): Branch => ({
   id: r.id,
@@ -331,8 +340,7 @@ async function fetchAll(table: string, order: [column: string, ascending: boolea
   for (let from = 0; ; from += PAGE) {
     let q = supabase().from(table).select("*");
     for (const [column, ascending] of order) q = q.order(column, { ascending });
-    const { data, error } = await q.range(from, from + PAGE - 1);
-    if (error) throw new Error(error.message);
+    const data = must(await q.range(from, from + PAGE - 1));
     rows.push(...data);
     if (data.length < PAGE) return rows;
   }
@@ -340,7 +348,16 @@ async function fetchAll(table: string, order: [column: string, ascending: boolea
 
 /** Devuelve `data` o lanza el mensaje de error de Postgres (p. ej. "Sin existencia suficiente…"). */
 function must<T>(res: { data: T | null; error: { message: string } | null }): T {
-  if (res.error) throw new Error(res.error.message);
+  if (res.error) {
+    // La cuenta se suspendió con la sesión abierta: init lleva a la pantalla de suspendida
+    if (res.error.message === "Cuenta suspendida") void useErp.getState().init();
+    // Las escrituras directas por tabla fallan por RLS sin mensaje propio: solo se re-inicia si de verdad está suspendida
+    else if (/row-level security/.test(res.error.message))
+      void supabase().rpc("my_membership").then(({ data }) => {
+        if ((data as Membership | null)?.state === "suspendida") void useErp.getState().init();
+      });
+    throw new Error(res.error.message);
+  }
   return res.data as T;
 }
 
@@ -490,6 +507,8 @@ export const useErp = create<ErpState>()((set, get) => {
     role: "vendedor",
     team: [],
     live: false,
+    membership: null,
+    plans: [],
 
     init: async () => {
       set({ status: "loading", error: undefined });
@@ -500,6 +519,13 @@ export const useErp = create<ErpState>()((set, get) => {
         const profile = toProfile(must(await sb.from("profiles").select("*").eq("id", auth.user.id).single()));
         set({ profile, role: profile.role === "dueno" ? "dueno" : "vendedor" });
         if (profile.role === "pendiente") {
+          set({ status: "ready" });
+          return;
+        }
+        const [res, plans] = await Promise.all([sb.rpc("my_membership"), fetchAll("plans", [["sort", true]])]);
+        const membership = must(res) as Membership;
+        set({ membership, plans: plans.map(toPlan) });
+        if (membership.state === "suspendida") {
           set({ status: "ready" });
           return;
         }
@@ -764,12 +790,13 @@ export function useBranchName() {
   return useCallback((id: BranchId) => branches.find((b) => b.id === id)?.short ?? id, [branches]);
 }
 
-export const useWholesaleEnabled = () => useErp((s) => s.wholesale.enabled);
+/** Mayoreo disponible: activado en Configuración y incluido en el plan vigente. */
+export const useWholesaleEnabled = () => useErp((s) => s.wholesale.enabled && hasModule(s.membership, "mayoreo"));
 
 /** Canales de venta del negocio; `mayoreo` solo si el módulo de mayoreo está activo. */
 export function useChannels(): Channel[] {
   const channels = useErp((s) => s.sales.channels);
-  const wholesale = useErp((s) => s.wholesale.enabled);
+  const wholesale = useWholesaleEnabled();
   return useMemo(() => {
     const base = channels.filter((c) => c !== "mayoreo");
     return wholesale ? [...base, "mayoreo"] : base;

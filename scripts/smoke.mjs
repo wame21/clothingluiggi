@@ -71,13 +71,12 @@ const routes = [
   ["pos", "/pos", "Venta actual"],
   ["inventario", "/inventario", "Existencias"],
   ["reabasto", "/inventario?tab=reabasto", "Qué comprar y cuánto"],
-  ["mayoreo", "/mayoreo", "El mayoreo está desactivado"],
+  ["mayoreo", "/mayoreo", "Mayoreo y cotizaciones"],
   ["clientes", "/clientes", "Total comprado"],
   ["finanzas", "/finanzas", "Estado de resultados"],
   ["reportes", "/reportes", "Rentabilidad por canal"],
   ["equipo", "/equipo", "Equipo"],
   ["configuracion", "/configuracion", "Configuración"],
-  ["integraciones", "/integraciones", "WooCommerce"],
 ];
 
 for (const [name, path, text] of routes) {
@@ -238,10 +237,10 @@ await step("inventario: la venta queda en el kardex (Movimientos)", async () => 
   await page.getByText(folio).first().waitFor({ timeout: 15000 });
 });
 
-await step("configuración: activar Mayoreo muestra el módulo", async () => {
+await step("configuración: Mayoreo nace activo y guarda datos de pago", async () => {
   await page.goto(BASE + "/configuracion", { waitUntil: "networkidle" });
   await page.getByRole("tab", { name: "Mayoreo" }).click();
-  await page.locator("#mayoreo-enabled").click();
+  await page.locator("#mayoreo-enabled[aria-checked='true']").waitFor({ timeout: 10000 });
   await panel().getByLabel("CLABE interbancaria").fill(clabeOf("00201007777777777"));
   await panel().getByLabel("Titular de la cuenta").fill("Titular Smoke");
   await shot("mayoreo-config");
@@ -250,6 +249,10 @@ await step("configuración: activar Mayoreo muestra el módulo", async () => {
   await page.getByRole("link", { name: "Mayoreo" }).first().waitFor({ timeout: 10000 });
   await page.goto(BASE + "/mayoreo", { waitUntil: "networkidle" });
   if (await page.getByText("El mayoreo está desactivado").count()) throw new Error("/mayoreo sigue desactivado");
+  await page.getByRole("tab", { name: "Análisis" }).click();
+  await page.getByText("Mejores mayoristas").waitFor({ timeout: 10000 });
+  await page.getByText("Control de mayoristas").waitFor({ timeout: 10000 });
+  await page.waitForTimeout(400);
   await shot("mayoreo-activo");
 });
 
@@ -332,6 +335,81 @@ await step("el usuario aprobado ya entra a la app", async () => {
   active = page;
 });
 await ctx2?.close();
+
+// ---------------------------------------------------------------------------
+// Membresías: el plan se mueve con el administrador de la plataforma y con la llave de servicio (fechas)
+// ---------------------------------------------------------------------------
+const { platformAdmin, service } = await import("./db-helpers.mjs");
+const admin = await platformAdmin(`admin${stamp}@example.test`);
+const { data: biz } = await service.from("businesses").select("id").eq("name", BUSINESS).single();
+const setPlan = (args) => admin.db.rpc("admin_set_plan", { p_business: biz.id, ...args });
+
+await step("membresía: en Lite, Mayoreo sale con candado y su ruta pide el plan", async () => {
+  const { error } = await setPlan({ p_plan: "lite" });
+  if (error) throw error;
+  await page.goto(BASE + "/mayoreo", { waitUntil: "networkidle" });
+  await page.getByText("Disponible en el plan", { exact: false }).first().waitFor({ timeout: 15000 });
+  await page.getByRole("link", { name: /Mayoreo.*Plan/ }).first().waitFor({ timeout: 10000 });
+  await shot("membresia-lite-mayoreo");
+});
+
+await step("membresía: plan vencido hace 1 día avisa que pasará a Lite", async () => {
+  const { error } = await service.from("businesses").update({ plan: "plus", paid_until: new Date(Date.now() - 864e5).toISOString() }).eq("id", biz.id);
+  if (error) throw error;
+  await page.goto(BASE + "/", { waitUntil: "networkidle" });
+  await page.getByRole("dialog").getByText("tu cuenta pasará al plan Lite", { exact: false }).waitFor({ timeout: 15000 });
+  await shot("membresia-gracia");
+  await page.getByRole("button", { name: "Entendido" }).click();
+});
+
+let ctx3;
+let page3;
+const adminRow = () => page3.getByRole("row").filter({ hasText: BUSINESS });
+const adminMenu = async (item) => {
+  await adminRow().getByRole("button", { name: `Acciones de ${BUSINESS}` }).click();
+  await page3.getByRole("menuitem", { name: item }).click();
+};
+
+await step("admin: ve el negocio y lo suspende desde /admin", async () => {
+  ctx3 = await newContext();
+  page3 = await ctx3.newPage();
+  watch(page3);
+  active = page3;
+  await page3.goto(BASE + "/login", { waitUntil: "networkidle" });
+  await page3.getByLabel("Correo").fill(admin.email);
+  await page3.getByLabel("Contraseña").fill(PASSWORD);
+  await page3.getByRole("button", { name: "Entrar", exact: true }).click();
+  await page3.waitForURL((u) => u.pathname === "/", { timeout: 20000 });
+  await page3.goto(BASE + "/admin", { waitUntil: "networkidle" });
+  await page3.getByPlaceholder("Buscar por negocio o correo").fill(BUSINESS);
+  await adminRow().first().waitFor({ timeout: 15000 });
+  await adminMenu("Suspender");
+  await page3.getByRole("dialog").getByPlaceholder("Falta de pago").fill("Prueba de humo");
+  await page3.getByRole("dialog").getByRole("button", { name: "Suspender", exact: true }).click();
+  await page3.getByText("Negocio suspendido").waitFor({ timeout: 15000 });
+  await page3.screenshot({ path: `${OUT}admin-suspendido.png` });
+  active = page;
+});
+
+await step("membresía: el dueño suspendido ve «Cuenta suspendida»", async () => {
+  await page.goto(BASE + "/", { waitUntil: "networkidle" });
+  await page.getByText("Cuenta suspendida").waitFor({ timeout: 15000 });
+  await shot("membresia-suspendida");
+});
+
+await step("admin: reactiva y marca pagado; el dueño vuelve a la app", async () => {
+  active = page3;
+  await adminMenu("Reactivar");
+  await page3.getByText("Negocio reactivado").waitFor({ timeout: 15000 });
+  await adminMenu("Marcar como pagado");
+  await page3.getByRole("dialog").getByRole("button", { name: "Marcar pagado" }).click();
+  await page3.getByText("Pago registrado").waitFor({ timeout: 15000 });
+  active = page;
+  await page.goto(BASE + "/pos", { waitUntil: "networkidle" });
+  await page.getByText("Venta actual").waitFor({ timeout: 15000 });
+  await shot("membresia-reactivada");
+});
+await ctx3?.close();
 
 await browser.close();
 console.log(results.join("\n"));

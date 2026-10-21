@@ -346,7 +346,7 @@ async function main() {
   await expectError("update_business: prefijo de pedido de más de 10 caracteres", ownerA.db.rpc("update_business", { p_name: "Flujos Alfa", p_order_prefix: "ABCDEFGHIJK", p_quote_prefix: "COT-" }), /10 caracteres/);
   await expectError("update_business: prefijo de cotización de más de 10 caracteres", ownerA.db.rpc("update_business", { p_name: "Flujos Alfa", p_order_prefix: "V-", p_quote_prefix: "ABCDEFGHIJK" }), /10 caracteres/);
   await expectError("update_business: el vendedor no puede", seller.db.rpc("update_business", { p_name: "Otro", p_order_prefix: "X-", p_quote_prefix: "Y-" }), /Solo el dueño/);
-  await expectError("update_business: el pendiente no puede", pending.db.rpc("update_business", { p_name: "Otro", p_order_prefix: "X-", p_quote_prefix: "Y-" }), /Solo el dueño/);
+  await expectError("update_business: el pendiente no puede", pending.db.rpc("update_business", { p_name: "Otro", p_order_prefix: "X-", p_quote_prefix: "Y-" }), /No autorizado/);
   const { data: bizUnchanged } = await ownerA.db.from("businesses").select("name, order_prefix, quote_prefix").single();
   check("los intentos rechazados no cambian el negocio", bizUnchanged?.name === "Flujos Alfa" && bizUnchanged.order_prefix === "V-" && bizUnchanged.quote_prefix === "COT-");
   const { data: tenChars, error: tenErr } = await ownerA.db.rpc("update_business", { p_name: "  Flujos Alfa  ", p_order_prefix: " ABCDEFGHIJ ", p_quote_prefix: "Q" });
@@ -365,7 +365,7 @@ async function main() {
 
   // Código de invitación
   await expectError("regenerate_invite_code: el vendedor no puede", seller.db.rpc("regenerate_invite_code"), /Solo el dueño/);
-  await expectError("regenerate_invite_code: el pendiente no puede", pending.db.rpc("regenerate_invite_code"), /Solo el dueño/);
+  await expectError("regenerate_invite_code: el pendiente no puede", pending.db.rpc("regenerate_invite_code"), /No autorizado/);
   const oldCode = bizA.invite_code;
   const { data: newCode, error: regenErr } = await ownerA.db.rpc("regenerate_invite_code");
   check("el dueño renueva el código de invitación", !regenErr && /^[A-Z2-9]{8}$/.test(newCode ?? "") && newCode !== oldCode, regenErr?.message);
@@ -379,7 +379,7 @@ async function main() {
 
   // Equipo
   await expectError("set_member: el vendedor no puede", seller.db.rpc("set_member", { p_id: pending.id, p_role: "vendedor", p_branch: centro.id }), /Solo el dueño/);
-  await expectError("set_member: el pendiente no puede", pending.db.rpc("set_member", { p_id: pending.id, p_role: "vendedor", p_branch: centro.id }), /Solo el dueño/);
+  await expectError("set_member: el pendiente no puede", pending.db.rpc("set_member", { p_id: pending.id, p_role: "vendedor", p_branch: centro.id }), /No autorizado/);
   await expectError("set_member: sucursal de otro negocio", ownerA.db.rpc("set_member", { p_id: seller.id, p_role: "vendedor", p_branch: principalB.id }), /Sucursal inválida/);
   await expectError("set_member: sucursal inexistente", ownerA.db.rpc("set_member", { p_id: seller.id, p_role: "vendedor", p_branch: "no-existe" }), /Sucursal inválida/);
   await expectError("set_member: no hay un segundo dueño", ownerA.db.rpc("set_member", { p_id: seller.id, p_role: "dueno", p_branch: null }), /Solo puede haber un dueño/);
@@ -426,7 +426,7 @@ async function main() {
   for (const [fn, args] of Object.entries(pendingCalls)) {
     await expectError(`el pendiente no ejecuta ${fn}`, pending.db.rpc(fn, args), /No autorizado/);
   }
-  await expectError("el pendiente no administra el equipo", pending.db.rpc("set_member", { p_id: pending.id, p_role: "dueno", p_branch: null }), /Solo el dueño/);
+  await expectError("el pendiente no administra el equipo", pending.db.rpc("set_member", { p_id: pending.id, p_role: "dueno", p_branch: null }), /No autorizado/);
   check("las operaciones del pendiente no cambiaron el pedido", (await ownerA.db.from("orders").select("status").eq("id", o2.id).single()).data?.status === "entregado");
 
   // Una cotización convertida ya es un pedido: editarla no debe crear otra cotización ni gastar folio

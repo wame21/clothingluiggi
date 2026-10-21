@@ -16,7 +16,7 @@ import {
   type SalesSettings,
 } from "@/lib/settings";
 import { errorMessage, useErp } from "@/lib/store";
-import type { Branch, LineItem, Product, Profile, Quote } from "@/lib/types";
+import type { Branch, LineItem, Membership, Product, Profile, Quote } from "@/lib/types";
 import {
   applyWholesaleSettings,
   DEFAULT_WHOLESALE,
@@ -273,6 +273,24 @@ const PROFILE: Profile = {
   createdAt: "2026-01-01T00:00:00Z",
 };
 
+const MEMBERSHIP: Membership = {
+  plan: "pro",
+  effectivePlan: "pro",
+  state: "prueba",
+  trialEndsAt: "2026-03-15T00:00:00Z",
+  paidUntil: null,
+  graceEndsAt: "2026-03-18T00:00:00Z",
+  modules: ["panel", "pos", "pedidos", "inventario", "clientes", "mayoreo", "finanzas", "reportes"],
+  price: 499,
+  suspendedReason: null,
+};
+
+/** `price_monthly` llega como texto numérico (numeric de Postgres); se lee ordenado por `sort`. */
+const PLAN_ROWS = [
+  { id: "lite", name: "Lite", price_monthly: "0", modules: ["panel", "pos", "pedidos", "inventario", "clientes"], sort: 0 },
+  { id: "plus", name: "Plus", price_monthly: "299.00", modules: ["panel", "pos", "pedidos", "inventario", "clientes", "mayoreo", "finanzas"], sort: 1 },
+];
+
 const profileRow = (patch: Row = {}): Row => ({
   id: "u-1",
   business_id: BUSINESS_ID,
@@ -456,6 +474,8 @@ const SETTINGS_ROWS: Row[] = [
 /** Datos completos de un dueño con negocio configurado. */
 function seedOwner() {
   fake.tables.profiles = [profileRow()];
+  fake.tables.plans = PLAN_ROWS;
+  fake.on("rpc.my_membership", () => ok(MEMBERSHIP));
   fake.tables.businesses = [businessRow()];
   fake.tables.branches = [
     branchRow(),
@@ -621,7 +641,7 @@ describe("init", () => {
     seedOwner();
     await state().init();
     const queried = new Set(fake.calls.filter((c) => c.kind === "table").map((c) => c.name));
-    expect(queried).toEqual(new Set(["profiles", "businesses", "products", "product_costs", "stock", "movements", "orders", "order_costs", "customers", "quotes", "expenses", "branches", "settings"]));
+    expect(queried).toEqual(new Set(["profiles", "plans", "businesses", "products", "product_costs", "stock", "movements", "orders", "order_costs", "customers", "quotes", "expenses", "branches", "settings"]));
     expect(opArgs(tableCalls("profiles")[0], "eq")).toEqual(["id", "u-1"]);
     expect(opArgs(tableCalls("businesses")[0], "eq")).toEqual(["id", BUSINESS_ID]);
   });
@@ -755,12 +775,50 @@ describe("init", () => {
     expect(fake.channels).toHaveLength(0);
   });
 
+  it("guarda la membresía y el catálogo de planes (precio como número, orden por sort)", async () => {
+    seedOwner();
+    await state().init();
+    expect(state().membership).toEqual(MEMBERSHIP);
+    expect(state().plans).toEqual([
+      { id: "lite", name: "Lite", price: 0, modules: PLAN_ROWS[0].modules },
+      { id: "plus", name: "Plus", price: 299, modules: PLAN_ROWS[1].modules },
+    ]);
+    expect(opArgs(tableCalls("plans")[0], "order")).toEqual(["sort", { ascending: true }]);
+  });
+
+  it("una cuenta suspendida queda lista sin cargar tablas ni suscribirse", async () => {
+    seedOwner();
+    fake.on("rpc.my_membership", () => ok({ ...MEMBERSHIP, state: "suspendida", suspendedReason: "Falta de pago" }));
+    await state().init();
+
+    expect(state().status).toBe("ready");
+    expect(state().membership?.suspendedReason).toBe("Falta de pago");
+    expect(state().business).toBeNull();
+    expect(state().products).toEqual([]);
+    expect(new Set(fake.calls.map((c) => c.name))).toEqual(new Set(["profiles", "my_membership", "plans"]));
+    expect(fake.channels).toHaveLength(0);
+  });
+
   it("al reintentar limpia el error anterior", async () => {
     useErp.setState({ status: "error", error: "viejo" });
     seedOwner();
     await state().init();
     expect(state().status).toBe("ready");
     expect(state().error).toBeUndefined();
+  });
+});
+
+describe("cuenta suspendida durante la sesión", () => {
+  it("el error 'Cuenta suspendida' de cualquier acción vuelve a correr init", async () => {
+    seedOwner();
+    signIn();
+    fake.on("rpc.add_payment", () => fail("Cuenta suspendida"));
+    fake.on("rpc.my_membership", () => ok({ ...MEMBERSHIP, state: "suspendida" }));
+
+    await expect(state().addPayment("o-1", { method: "efectivo", amount: 10 })).rejects.toThrow("Cuenta suspendida");
+    await vi.waitFor(() => expect(state().membership?.state).toBe("suspendida"));
+    expect(state().status).toBe("ready");
+    expect(rpcCalls("my_membership")).toHaveLength(1);
   });
 });
 

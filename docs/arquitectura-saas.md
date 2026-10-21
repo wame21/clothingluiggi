@@ -202,6 +202,26 @@ Valores neutros: nada de cifras de una tienda en particular.
   "bank": { "bank": "", "holder": "", "clabe": "" } }
 ```
 
+## Membresías (migración `membresias`)
+
+- **Planes** (`plans`, solo lectura; precios y módulos son datos): Lite gratis = panel, pos, pedidos, inventario, clientes ·
+  Plus = Lite + mayoreo, finanzas · Pro = Plus + reportes. Equipo y Configuración van en todos.
+- **Columnas de `businesses`:** `plan`, `trial_ends_at`, `paid_until`, `suspended_at`, `suspended_reason`. Un negocio nuevo
+  arranca con 14 días de prueba de Pro; los existentes, con prueba desde la migración.
+- **Estado calculado con `now()`** en `membership(b)` (sin tareas programadas), por orden:
+  suspendida (bloquea) · plan Lite → activa · sin `paid_until`: prueba hasta `trial_ends_at`, luego vencida con Lite ·
+  con `paid_until`: activa, 3 días de gracia con su plan y luego vencida con Lite. Vencida nunca bloquea: solo baja a Lite.
+- **Dónde se aplica:** `is_member()`/`is_owner()` exigen que no esté suspendida, así que RLS y las RPC niegan todo
+  (`assert_member()` dice «Cuenta suspendida»). `has_module()` protege `save_quote`, `convert_quote`, la escritura de
+  cotizaciones y los gastos («Tu plan no incluye Mayoreo»). Reportes solo se oculta en la interfaz. Al bajar de plan
+  no se borra nada; las cotizaciones siguen legibles.
+- **Cobro manual:** `platform_admins` (se llena por SQL) y `membership_events` (historial) no son accesibles desde la app.
+  RPC para `authenticated` que validan `is_platform_admin()` y registran el evento: `admin_businesses`, `admin_set_plan`
+  (mejorar/degradar, con pago opcional; Lite deja `paid_until` nulo), `admin_mark_paid` (`greatest(paid_until, now()) + meses`,
+  sin cargos extra), `admin_suspend`, `admin_reactivate` y `admin_events`.
+- **Para la app:** `my_membership()` devuelve plan, plan efectivo, estado, fechas, módulos, precio y motivo; responde
+  aunque la cuenta esté suspendida. `has_module()` e `is_platform_admin()` también.
+
 ## App (`src/`)
 
 - `BranchId`, `Category` y `TierId` pasan a ser `string`. `StockMap` = `Record<variantKey, Record<BranchId, number>>`;
