@@ -1,6 +1,5 @@
 "use client";
 
-import { APP_NAME } from "@/lib/constants";
 import { useErp, useBusinessName } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -46,7 +45,6 @@ export function BrandLockup() {
       <BrandMark />
       <div className="min-w-0 leading-tight">
         <div className="truncate font-display text-xl font-semibold uppercase tracking-[0.18em] gold-text">{name}</div>
-        <div className="truncate text-[10px] uppercase tracking-[0.22em] text-sidebar-foreground/60">{APP_NAME}</div>
       </div>
     </div>
   );

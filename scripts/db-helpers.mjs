@@ -48,6 +48,17 @@ export async function user(email, data) {
   return { db: client, id: me.user.id, email };
 }
 
+// Cliente con la llave de servicio: se salta RLS para mover fechas de membresía y dar de alta administradores.
+export const service = createClient(URL, SERVICE_KEY, { auth: { persistSession: false } });
+
+// Administrador de la plataforma: usuario normal (con su propio negocio) dado de alta en platform_admins.
+export async function platformAdmin(email) {
+  const admin = await user(email, { name: "Admin", business_name: "Plataforma" });
+  const { error } = await service.from("platform_admins").insert({ user_id: admin.id });
+  if (error) throw error;
+  return admin;
+}
+
 const stamp = Date.now();
 export const mail = (who) => `${who}${stamp}@example.test`;
 

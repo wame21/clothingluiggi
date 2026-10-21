@@ -15,7 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { onlyDigits } from "@/lib/clabe";
 import { CUSTOMER_TYPE_LABEL } from "@/lib/constants";
 import { fDate, fRelative, mxn, num } from "@/lib/format";
-import { orderBalance } from "@/lib/metrics";
+import { customerStats } from "@/lib/metrics";
 import { useBusinessName, useErp, useWholesaleEnabled } from "@/lib/store";
 import type { Customer, CustomerType, Order } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -49,24 +49,14 @@ function Clientes() {
   const [selected, setSelected] = useState<string | null>(params.get("c"));
   const [now] = useState(() => Date.now());
 
-  const rows = useMemo<Row[]>(() => {
-    const byCustomer = new Map<string, Order[]>();
-    for (const o of orders) if (o.customerId && o.status !== "cancelado") byCustomer.set(o.customerId, [...(byCustomer.get(o.customerId) ?? []), o]);
-    return customers
-      .map((c) => {
-        const list = (byCustomer.get(c.id) ?? []).sort((a, b) => b.date.localeCompare(a.date));
-        const last = list[0]?.date;
-        return {
-          customer: c,
-          orders: list,
-          total: list.reduce((a, o) => a + o.total, 0),
-          balance: list.reduce((a, o) => a + orderBalance(o), 0),
-          last,
-          inactive: c.type !== "menudeo" && (!last || now - new Date(last).getTime() > 30 * DAY),
-        };
-      })
-      .sort((a, b) => b.total - a.total);
-  }, [customers, orders, now]);
+  const rows = useMemo<Row[]>(
+    () =>
+      customerStats(customers, orders).map((s) => ({
+        ...s,
+        inactive: s.customer.type !== "menudeo" && (!s.last || now - new Date(s.last).getTime() > 30 * DAY),
+      })),
+    [customers, orders, now],
+  );
 
   const filtered = rows
     .filter((r) => (type === "all" ? true : type === "inactivos" ? r.inactive : r.customer.type === type))

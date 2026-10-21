@@ -1,18 +1,21 @@
 "use client";
 
-import { Boxes, FileText, Handshake, Percent, Plus, TrendingUp } from "lucide-react";
+import { Boxes, FileText, Handshake, MessageCircle, Percent, Plus, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { change, KpiCard, PageHeader, QuoteStatusBadge } from "@/components/erp";
+import { SimpleBars } from "@/components/charts";
+import { change, KpiCard, PageHeader, PeriodSelect, QuoteStatusBadge, ShareBar } from "@/components/erp";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { fDate, mxn, num, pct } from "@/lib/format";
-import { inRange, periodRange, salesSummary } from "@/lib/metrics";
-import { useErp, useIsOwner, useWholesaleEnabled } from "@/lib/store";
+import { onlyDigits } from "@/lib/clabe";
+import { CUSTOMER_TYPE_LABEL } from "@/lib/constants";
+import { fDate, fRelative, mxn, num, pct } from "@/lib/format";
+import { inRange, type Period, periodRange, salesSummary, wholesaleBuyers, wholesaleMonthly, wholesaleOrders } from "@/lib/metrics";
+import { useBusinessName, useErp, useIsOwner, useWholesaleEnabled } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { tierPrice, WHOLESALE_TERMS } from "@/lib/wholesale";
 import { WholesaleDisabled } from "./_comunes";
@@ -21,6 +24,123 @@ const DAY = 86_400_000;
 
 export default function MayoreoPage() {
   return useWholesaleEnabled() ? <Mayoreo /> : <WholesaleDisabled />;
+}
+
+function Analisis() {
+  const customers = useErp((s) => s.customers);
+  const orders = useErp((s) => s.orders);
+  const businessName = useBusinessName();
+  const [period, setPeriod] = useState<Period>("mes");
+  const buyers = useMemo(() => wholesaleBuyers(customers, orders, periodRange(period).cur), [customers, orders, period]);
+  const monthly = useMemo(() => wholesaleMonthly(orders), [orders]);
+  const top = buyers.filter((b) => b.revenue > 0).slice(0, 10);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex justify-end">
+        <PeriodSelect value={period} onChange={setPeriod} />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Mejores mayoristas</CardTitle>
+            <CardDescription>Top 10 por venta neta de mayoreo en el periodo.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {top.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Sin ventas de mayoreo en este periodo.</p>}
+            {top.map((b) => (
+              <ShareBar
+                key={b.customer.id}
+                label={b.customer.business ?? b.customer.name}
+                value={mxn(b.revenue)}
+                share={b.revenue / top[0].revenue}
+                color="var(--ch-tienda)"
+                sub={`${CUSTOMER_TYPE_LABEL[b.customer.type]} · ${b.periodOrders} ${b.periodOrders === 1 ? "pedido" : "pedidos"}`}
+              />
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Ventas de mayoreo por mes</CardTitle>
+            <CardDescription>Últimos 6 meses; el mes en curso va parcial.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SimpleBars
+              data={monthly.map((m) => ({ label: m.month, value: m.revenue, hint: m.partial ? "Mes en curso" : "Venta de mayoreo" }))}
+              format={mxn}
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="gap-0 py-0">
+        <CardHeader className="py-4">
+          <CardTitle className="text-sm">Control de mayoristas</CardTitle>
+          <CardDescription>Compras del periodo elegido; el saldo por cobrar es el total abierto del cliente.</CardDescription>
+        </CardHeader>
+        <Table className="min-w-[760px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="pl-4">Cliente</TableHead>
+              <TableHead>Tipo</TableHead>
+              <TableHead className="text-right">Compras</TableHead>
+              <TableHead className="text-right">Pedidos</TableHead>
+              <TableHead>Última compra</TableHead>
+              <TableHead className="text-right">Saldo</TableHead>
+              <TableHead className="pr-4" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {buyers.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={7} className="py-6 text-center text-muted-foreground">
+                  Aún no tienes clientes mayoristas o distribuidores.
+                </TableCell>
+              </TableRow>
+            )}
+            {buyers.map(({ customer: c, revenue, periodOrders, last, balance }) => {
+              const waText = encodeURIComponent(
+                `Hola ${c.name.split(" ")[0]}, te saluda ${businessName}. Ya tenemos nuevos modelos y precios de mayoreo actualizados. ¿Te mando la cotización?`,
+              );
+              return (
+                <TableRow key={c.id}>
+                  <TableCell className="pl-4">
+                    <Link href={`/clientes?c=${c.id}`} className="font-medium hover:underline">
+                      {c.business ?? c.name}
+                    </Link>
+                    {c.business && <div className="text-xs text-muted-foreground">{c.name}</div>}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="border-gold/40 text-gold">
+                      {CUSTOMER_TYPE_LABEL[c.type]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right font-medium tabular">{mxn(revenue)}</TableCell>
+                  <TableCell className="text-right tabular">{periodOrders}</TableCell>
+                  <TableCell className="text-muted-foreground" title={last ? fDate(last) : undefined}>
+                    {last ? fRelative(last) : "Sin compras"}
+                  </TableCell>
+                  <TableCell className={cn("text-right tabular", balance > 0 ? "text-warning" : "text-muted-foreground")}>
+                    {balance > 0 ? mxn(balance) : "—"}
+                  </TableCell>
+                  <TableCell className="pr-4 text-right">
+                    <Button asChild size="sm" variant="outline">
+                      <a href={`https://wa.me/52${onlyDigits(c.phone).slice(-10)}?text=${waText}`} target="_blank" rel="noreferrer">
+                        <MessageCircle /> WhatsApp
+                      </a>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </Card>
+    </div>
+  );
 }
 
 function Mayoreo() {
@@ -41,14 +161,14 @@ function Mayoreo() {
     const monthQuotes = quotes.filter((q) => inRange(q.date, cur));
     const closed = quotes.filter((q) => q.status === "convertida").length;
     const lost = quotes.filter((q) => q.status === "rechazada").length;
-    const wholesaleOrders = orders.filter((o) => o.channel === "mayoreo");
-    const recent = wholesaleOrders.filter((o) => now - new Date(o.date).getTime() < 60 * DAY);
+    const wholesaleSales = wholesaleOrders(orders);
+    const recent = wholesaleSales.filter((o) => now - new Date(o.date).getTime() < 60 * DAY);
     return {
       quoted: monthQuotes.reduce((a, q) => a + q.total, 0),
       quotedN: monthQuotes.length,
       closeRate: closed + lost ? closed / (closed + lost) : 0,
-      sales: salesSummary(wholesaleOrders, cur),
-      salesPrev: salesSummary(wholesaleOrders, prev),
+      sales: salesSummary(wholesaleSales, cur),
+      salesPrev: salesSummary(wholesaleSales, prev),
       activeBuyers: new Set(recent.map((o) => o.customerId)).size,
       wholesaleCustomers: customers.filter((c) => c.type !== "menudeo").length,
     };
@@ -87,8 +207,13 @@ function Mayoreo() {
       <Tabs value={tab} onValueChange={setTab} className="mt-4">
         <TabsList>
           <TabsTrigger value="cotizaciones">Cotizaciones</TabsTrigger>
+          <TabsTrigger value="analisis">Análisis</TabsTrigger>
           <TabsTrigger value="esquema">Esquema de precios</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="analisis">
+          <Analisis />
+        </TabsContent>
 
         <TabsContent value="cotizaciones">
           <Card className="gap-0 py-0">
