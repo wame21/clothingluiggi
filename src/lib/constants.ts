@@ -2,7 +2,6 @@ import type {
   Channel,
   CustomerType,
   ExpenseCategory,
-  ModuleKey,
   OrderStatus,
   PaymentMethod,
   QuoteStatus,
@@ -80,18 +79,4 @@ export const CUSTOMER_TYPE_LABEL: Record<CustomerType, string> = {
   menudeo: "Minorista",
   mayorista: "Mayorista",
   distribuidor: "Distribuidor",
-};
-
-/** shortcut: datos de pago fijos en código; moverlos a la base si cambian seguido */
-export const SUPPORT_PAYMENT = { bank: "", clabe: "", holder: "", whatsapp: "" };
-
-export const MODULE_LABEL: Record<ModuleKey, string> = {
-  panel: "Panel general",
-  pos: "Punto de venta",
-  pedidos: "Pedidos",
-  inventario: "Inventario",
-  clientes: "Clientes",
-  mayoreo: "Mayoreo",
-  finanzas: "Finanzas",
-  reportes: "Reportes",
 };

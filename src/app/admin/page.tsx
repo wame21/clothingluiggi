@@ -1,6 +1,7 @@
 "use client";
 
-import { LogOut, MoreHorizontal, Search } from "lucide-react";
+import { Ban, Landmark, LogOut, MoreHorizontal, RotateCcw, Search, Store } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -13,11 +14,11 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { fDate } from "@/lib/format";
-import { PLAN_NAMES, STATE_LABELS, daysLeft } from "@/lib/membership";
+import { fDate, mxn } from "@/lib/format";
+import { STATE_LABELS, daysLeft } from "@/lib/membership";
 import { supabase } from "@/lib/supabase/client";
 import type { MembershipState } from "@/lib/types";
-import { ActionDialog, type Action, type AdminBusiness } from "./_components/dialogs";
+import { ActionDialog, SettingsDialog, type Action, type AdminBusiness, type PlatformSettings } from "./_components/dialogs";
 
 const STATES = Object.keys(STATE_LABELS) as MembershipState[];
 
@@ -31,7 +32,6 @@ const BADGE: Record<MembershipState, "default" | "secondary" | "outline" | "dest
 
 /** Etiqueta del estado con los días que le quedan a la prueba o a la gracia. */
 function stateText(b: AdminBusiness) {
-  if (b.state === "vencida") return "Vencida → Lite";
   const days = b.state === "prueba" || b.state === "gracia" ? daysLeft(b.ends_at) : null;
   return days === null ? STATE_LABELS[b.state] : `${STATE_LABELS[b.state]} · ${days} ${days === 1 ? "día" : "días"}`;
 }
@@ -42,11 +42,19 @@ export default function AdminPage() {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<MembershipState | "todos">("todos");
   const [target, setTarget] = useState<{ biz: AdminBusiness; action: Action } | null>(null);
+  const [settings, setSettings] = useState<PlatformSettings | null>(null);
+  const [editingSettings, setEditingSettings] = useState(false);
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase().rpc("admin_businesses");
-    if (error) toast.error(error.message);
-    setRows((data as AdminBusiness[] | null) ?? []);
+    const [biz, cfg] = await Promise.all([
+      supabase().rpc("admin_businesses"),
+      supabase().from("platform_settings").select("price_monthly, price_setup, bank, clabe, holder, whatsapp").single(),
+    ]);
+    if (biz.error) toast.error(biz.error.message);
+    if (cfg.error) toast.error(cfg.error.message);
+    setRows((biz.data as AdminBusiness[] | null) ?? []);
+    // numeric de Postgres puede llegar como texto
+    if (cfg.data) setSettings({ ...cfg.data, price_monthly: Number(cfg.data.price_monthly), price_setup: Number(cfg.data.price_setup) });
   }, []);
 
   useEffect(() => {
@@ -87,15 +95,34 @@ export default function AdminPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="flex items-center justify-between gap-3 bg-sidebar px-4 py-3 text-sidebar-foreground">
+    <div className="min-h-screen">
+      <header className="m-3 flex items-center justify-between gap-3 rounded-[20px] border border-sidebar-border bg-sidebar px-4 py-3 text-sidebar-foreground shadow-[0_24px_60px_-30px_rgb(4_2_10/0.6)] backdrop-blur-xl backdrop-saturate-150">
         <BrandLockup />
-        <Button variant="outline" size="sm" className="shrink-0 text-foreground" onClick={() => void signOut()}>
-          <LogOut /> Cerrar sesión
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button asChild variant="outline" size="sm" className="text-foreground" aria-label="Ir a mi negocio">
+            <Link href="/">
+              <Store /> <span className="hidden sm:inline">Ir a mi negocio</span>
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" className="text-foreground" aria-label="Cerrar sesión" onClick={() => void signOut()}>
+            <LogOut /> <span className="hidden sm:inline">Cerrar sesión</span>
+          </Button>
+        </div>
       </header>
       <main className="mx-auto max-w-7xl p-4 md:p-6">
-        <PageHeader title="Administración de la plataforma" description="Negocios, planes y pagos." />
+        <PageHeader
+          title="Administración de la plataforma"
+          description={
+            settings
+              ? `Negocios, membresías y pagos · ${mxn(settings.price_monthly)} al mes, alta de ${mxn(settings.price_setup)}.`
+              : "Negocios, membresías y pagos."
+          }
+          actions={
+            <Button variant="outline" size="sm" disabled={!settings} onClick={() => setEditingSettings(true)}>
+              <Landmark /> Datos de cobro
+            </Button>
+          }
+        />
 
         <div className="mb-4 flex flex-wrap gap-2">
           {STATES.map((s) => (
@@ -136,18 +163,17 @@ export default function AdminPage() {
                 <TableRow>
                   <TableHead className="pl-4">Negocio</TableHead>
                   <TableHead>Dueño</TableHead>
-                  <TableHead>Plan</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Vence</TableHead>
                   <TableHead className="text-right">Usuarios</TableHead>
                   <TableHead className="text-right">Pedidos 30 d</TableHead>
                   <TableHead>Alta</TableHead>
-                  <TableHead className="sticky right-0 bg-card" />
+                  <TableHead className="sticky right-0 bg-background" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {shown.map((b) => {
-                  const due = b.plan === "lite" && !b.paid_until ? null : (b.paid_until ?? b.trial_ends_at);
+                  const due = b.paid_until ?? b.trial_ends_at;
                   return (
                     <TableRow key={b.id}>
                       <TableCell className="pl-4 font-medium">{b.name}</TableCell>
@@ -155,7 +181,6 @@ export default function AdminPage() {
                         {b.owner_name}
                         <div className="text-xs text-muted-foreground">{b.owner_email}</div>
                       </TableCell>
-                      <TableCell>{PLAN_NAMES[b.plan]}</TableCell>
                       <TableCell>
                         <Badge variant={BADGE[b.state]} className="whitespace-nowrap">
                           {stateText(b)}
@@ -165,31 +190,31 @@ export default function AdminPage() {
                       <TableCell className="text-right">{b.members}</TableCell>
                       <TableCell className="text-right">{b.orders_30d}</TableCell>
                       <TableCell className="whitespace-nowrap">{fDate(b.created_at)}</TableCell>
-                      <TableCell className="sticky right-0 bg-card">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" aria-label={`Acciones de ${b.name}`}>
-                              <MoreHorizontal />
+                      <TableCell className="sticky right-0 bg-background">
+                        <div className="flex items-center justify-end gap-1">
+                          {b.state === "suspendida" ? (
+                            <Button variant="outline" size="sm" onClick={() => void reactivate(b)}>
+                              <RotateCcw /> Reactivar
                             </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => setTarget({ biz: b, action: "pagar" })}>
-                              Marcar como pagado
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setTarget({ biz: b, action: "mejorar" })}>Mejorar plan</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setTarget({ biz: b, action: "degradar" })}>
-                              Degradar a Lite
-                            </DropdownMenuItem>
-                            {b.state === "suspendida" ? (
-                              <DropdownMenuItem onClick={() => void reactivate(b)}>Reactivar</DropdownMenuItem>
-                            ) : (
-                              <DropdownMenuItem variant="destructive" onClick={() => setTarget({ biz: b, action: "suspender" })}>
-                                Suspender
+                          ) : (
+                            <Button variant="outline" size="sm" className="text-destructive" onClick={() => setTarget({ biz: b, action: "suspender" })}>
+                              <Ban /> Suspender
+                            </Button>
+                          )}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" aria-label={`Acciones de ${b.name}`}>
+                                <MoreHorizontal />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => setTarget({ biz: b, action: "pagar" })}>
+                                Marcar como pagado
                               </DropdownMenuItem>
-                            )}
-                            <DropdownMenuItem onClick={() => setTarget({ biz: b, action: "historial" })}>Historial</DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                              <DropdownMenuItem onClick={() => setTarget({ biz: b, action: "historial" })}>Historial</DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -199,8 +224,19 @@ export default function AdminPage() {
           )}
         </Card>
       </main>
+      {editingSettings && settings && (
+        <SettingsDialog
+          settings={settings}
+          onClose={() => setEditingSettings(false)}
+          onDone={() => {
+            setEditingSettings(false);
+            void load();
+          }}
+        />
+      )}
       <ActionDialog
         target={target}
+        settings={settings}
         onClose={() => setTarget(null)}
         onDone={() => {
           setTarget(null);

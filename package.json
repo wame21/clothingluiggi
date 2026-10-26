@@ -11,7 +11,8 @@
     "db:test": "node scripts/db-test.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:flows": "node scripts/db-flows.mjs"
+    "db:flows": "node scripts/db-flows.mjs",
+    "db:demo": "node scripts/demo-seed.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

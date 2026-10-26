@@ -1,8 +1,5 @@
-import { MODULE_LABEL } from "./constants";
-import { fLongDate } from "./format";
-import type { ModuleKey, Membership, MembershipState, Plan, PlanTier } from "./types";
-
-export const PLAN_NAMES: Record<PlanTier, string> = { lite: "Lite", plus: "Plus", pro: "Pro" };
+import { fLongDate, mxn } from "./format";
+import type { Membership, MembershipState } from "./types";
 
 export const STATE_LABELS: Record<MembershipState, string> = {
   prueba: "Prueba",
@@ -18,20 +15,23 @@ export function daysLeft(iso: string | null, now = new Date()): number | null {
   return Math.ceil((new Date(iso).getTime() - now.getTime()) / 86_400_000) || 0;
 }
 
-export const hasModule = (m: Membership | null, k: ModuleKey) => !!m?.modules.includes(k);
+/** Vencida o suspendida: la base niega todo y la app solo muestra la pantalla de pago. */
+export const isBlocked = (m: Membership | null) => m?.state === "vencida" || m?.state === "suspendida";
 
-/** Plan más barato (el primero por `sort`) que incluye el módulo; `plans` ya viene ordenado. */
-export const minPlanFor = (plans: Plan[], k: ModuleKey) => plans.find((p) => p.modules.includes(k));
+/** Lo que toca pagar: el primer pago (sin mensualidades registradas) incluye el alta. */
+export const amountDue = (m: Membership) => m.priceMonthly + (m.paidUntil ? 0 : m.priceSetup);
+
+/** Concepto de `amountDue`, con el desglose cuando incluye el alta. */
+export const dueLabel = (m: Membership) =>
+  m.paidUntil ? "Mensualidad" : `Alta ${mxn(m.priceSetup)} + primera mensualidad ${mxn(m.priceMonthly)}`;
 
 /** En gracia, o en los últimos 3 días de la prueba: hay que avisar que falta el pago. */
 export const needsPayment = (m: Membership, now = new Date()) =>
   m.state === "gracia" || (m.state === "prueba" && (daysLeft(m.trialEndsAt, now) ?? Infinity) <= 3);
 
-/** Leyenda de la bajada a Lite; la prueba no tiene gracia, así que baja el día que vence (`trialEndsAt`). */
-export function graceNotice(m: Membership, plans: Plan[]) {
-  const drops = m.graceEndsAt ?? m.trialEndsAt;
-  if (!drops) return "";
-  const lite = plans.find((p) => p.id === "lite")?.modules ?? [];
-  const lost = new Intl.ListFormat("es").format(m.modules.filter((k) => !lite.includes(k)).map((k) => MODULE_LABEL[k]));
-  return `Si no se registra tu pago antes del ${fLongDate(drops)}, tu cuenta pasará al plan Lite y se bloquearán ${lost}. Tus datos se conservan.`;
+/** Leyenda del bloqueo; la prueba no tiene gracia, así que se bloquea el día que vence (`trialEndsAt`). */
+export function graceNotice(m: Membership) {
+  const blocks = m.graceEndsAt ?? m.trialEndsAt;
+  if (!blocks) return "";
+  return `Si no se registra tu pago antes del ${fLongDate(blocks)}, el sistema se bloqueará hasta que pagues. Tus datos se conservan.`;
 }

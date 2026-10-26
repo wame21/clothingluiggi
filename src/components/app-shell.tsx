@@ -2,9 +2,9 @@
 
 import {
   AlertTriangle,
-  Ban,
   BarChart3,
   Boxes,
+  CreditCard,
   FileText,
   Hourglass,
   LayoutDashboard,
@@ -14,6 +14,7 @@ import {
   Moon,
   RefreshCw,
   Settings,
+  ShieldCheck,
   ShoppingBag,
   Store,
   Sun,
@@ -40,9 +41,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { mxn } from "@/lib/format";
-import { graceNotice, hasModule, minPlanFor, needsPayment, PLAN_NAMES } from "@/lib/membership";
+import { amountDue, dueLabel, graceNotice, isBlocked, needsPayment } from "@/lib/membership";
 import { useBusinessName, useErp, useWholesaleEnabled } from "@/lib/store";
-import type { ModuleKey } from "@/lib/types";
+import { supabase } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -51,8 +52,6 @@ interface NavItem {
   icon: typeof LayoutDashboard;
   ownerOnly?: boolean;
   wholesaleOnly?: boolean;
-  /** Módulo del plan que lo habilita; sin él, siempre disponible (Equipo, Configuración). */
-  module?: ModuleKey;
   badge?: "orders" | "quotes";
 }
 
@@ -60,20 +59,19 @@ const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: "Operación",
     items: [
-      { href: "/", label: "Panel general", icon: LayoutDashboard, module: "panel" },
-      { href: "/pedidos", label: "Pedidos", icon: ShoppingBag, badge: "orders", module: "pedidos" },
-      { href: "/pos", label: "Punto de venta", icon: Store, module: "pos" },
-      { href: "/inventario", label: "Inventario", icon: Boxes, module: "inventario" },
-      { href: "/mayoreo", label: "Mayoreo", icon: FileText, badge: "quotes", wholesaleOnly: true, module: "mayoreo" },
-      { href: "/clientes", label: "Clientes", icon: Users, module: "clientes" },
+      { href: "/", label: "Panel general", icon: LayoutDashboard },
+      { href: "/pedidos", label: "Pedidos", icon: ShoppingBag, badge: "orders" },
+      { href: "/pos", label: "Punto de venta", icon: Store },
+      { href: "/inventario", label: "Inventario", icon: Boxes },
+      { href: "/mayoreo", label: "Mayoreo", icon: FileText, badge: "quotes", wholesaleOnly: true },
+      { href: "/clientes", label: "Clientes", icon: Users },
     ],
   },
   {
     section: "Negocio",
     items: [
-      { href: "/finanzas", label: "Finanzas", icon: Wallet, ownerOnly: true, module: "finanzas" },
-      // shortcut: Reportes se calcula en el navegador con datos propios; bloquear en servidor si se vuelve un cálculo del servidor
-      { href: "/reportes", label: "Reportes", icon: BarChart3, ownerOnly: true, module: "reportes" },
+      { href: "/finanzas", label: "Finanzas", icon: Wallet, ownerOnly: true },
+      { href: "/reportes", label: "Reportes", icon: BarChart3, ownerOnly: true },
       { href: "/equipo", label: "Equipo", icon: UserCog, ownerOnly: true },
       { href: "/configuracion", label: "Configuración", icon: Settings, ownerOnly: true },
     ],
@@ -155,8 +153,6 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const role = useErp((s) => s.role);
   const wholesale = useWholesaleEnabled();
   const badges = useNavBadges();
-  const membership = useErp((s) => s.membership);
-  const plans = useErp((s) => s.plans);
 
   return (
     <nav className="flex flex-col gap-6">
@@ -165,10 +161,9 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           <div className="px-3 pb-1 text-[10px] font-medium uppercase tracking-[0.2em] text-sidebar-foreground/40">
             {group.section}
           </div>
-          {group.items.filter((item) => wholesale || !item.wholesaleOnly || (item.module && !hasModule(membership, item.module))).map((item) => {
+          {group.items.filter((item) => wholesale || !item.wholesaleOnly).map((item) => {
             const active = isActive(item.href, pathname);
             const locked = item.ownerOnly && role !== "dueno";
-            const upgrade = item.module && !hasModule(membership, item.module) ? minPlanFor(plans, item.module) : undefined;
             const count = item.badge ? badges[item.badge] : 0;
             return (
               <Link
@@ -176,19 +171,15 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
                 href={item.href}
                 onClick={onNavigate}
                 className={cn(
-                  "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                  active && "bg-sidebar-accent text-sidebar-accent-foreground",
-                  (locked || upgrade) && "opacity-50",
+                  "group flex h-11 items-center gap-3 rounded-[14px] px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  active && "bg-sidebar-accent font-semibold text-sidebar-accent-foreground inset-shadow-[0_1px_0_rgb(255_255_255/0.14)]",
+                  locked && "opacity-50",
                 )}
               >
-                <item.icon className={cn("size-4 shrink-0", active ? "text-sidebar-primary" : "text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80")} />
+                <item.icon className={cn("size-[18px] shrink-0", active ? "text-sidebar-primary" : "text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80")} />
                 <span className="flex-1 truncate">{item.label}</span>
                 {locked ? (
                   <Lock className="size-3.5 text-sidebar-foreground/40" />
-                ) : upgrade ? (
-                  <span className="flex items-center gap-1 text-[11px] text-sidebar-foreground/60">
-                    <Lock className="size-3.5 text-sidebar-foreground/40" /> Plan {upgrade.name}
-                  </span>
                 ) : count > 0 ? (
                   <span className="rounded-full bg-sidebar-primary/15 px-1.5 py-px text-[11px] font-medium tabular text-sidebar-primary">
                     {count}
@@ -233,6 +224,24 @@ function ThemeToggle() {
   return (
     <Button variant="ghost" size="icon" aria-label="Cambiar tema" onClick={() => setTheme(dark ? "light" : "dark")}>
       {dark ? <Sun /> : <Moon />}
+    </Button>
+  );
+}
+
+/** Acceso al panel /admin, solo para administradores de la plataforma (la página vuelve a validar). */
+function AdminLink() {
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => {
+    void supabase()
+      .rpc("is_platform_admin")
+      .then(({ data }) => setAdmin(data === true));
+  }, []);
+  if (!admin) return null;
+  return (
+    <Button asChild variant="outline" size="sm" aria-label="Administración">
+      <Link href="/admin">
+        <ShieldCheck /> <span className="hidden sm:inline">Administración</span>
+      </Link>
     </Button>
   );
 }
@@ -284,59 +293,38 @@ function Restricted() {
   );
 }
 
-function Upgrade({ plan }: { plan: string }) {
-  return (
-    <div className="mx-auto mt-24 flex max-w-md flex-col items-center gap-4 text-center">
-      <div className="grid size-14 place-items-center rounded-full bg-muted">
-        <Lock className="size-6 text-muted-foreground" />
-      </div>
-      <h2 className="text-xl font-semibold">Disponible en el plan {plan}</h2>
-      <p className="text-sm text-muted-foreground">El dueño puede mejorar el plan en Configuración → Membresía. Tus datos se conservan.</p>
-    </div>
-  );
-}
-
-/** Aviso de pago pendiente (gracia o últimos 3 días de prueba) o de plan vencido: diálogo al cargar la app y banner fijo. */
+/** Aviso de pago pendiente (gracia o últimos 3 días de prueba): diálogo al cargar la app y banner fijo. */
 function MembershipNotice() {
   const m = useErp((s) => s.membership);
-  const plans = useErp((s) => s.plans);
   const [open, setOpen] = useState(true);
-  if (!m) return null;
+  if (!m || !needsPayment(m)) return null;
 
-  const pay = needsPayment(m);
-  if (!pay && m.state !== "vencida") return null;
-
-  const plan = PLAN_NAMES[m.plan];
-  const text = pay
-    ? `${graceNotice(m, plans)} Monto del plan ${plan}: ${mxn(m.price)}.`
-    : `Estás en Lite porque tu plan venció; paga ${mxn(m.price)} para recuperar ${plan}.`;
+  const text = `${graceNotice(m)} A pagar: ${mxn(amountDue(m))} (${dueLabel(m)}).`;
   return (
     <>
       <div role="status" className="flex items-start gap-2 bg-amber-100 px-4 py-2 text-xs text-amber-950 dark:bg-amber-950 dark:text-amber-100 md:px-6">
         <AlertTriangle className="mt-px size-3.5 shrink-0" />
         <span>{text}</span>
       </div>
-      {pay && (
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Registra tu pago</DialogTitle>
-              <DialogDescription>{text}</DialogDescription>
-            </DialogHeader>
-            <PaymentInfo />
-            <DialogFooter>
-              <Button onClick={() => setOpen(false)}>Entendido</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Registra tu pago</DialogTitle>
+            <DialogDescription>{text}</DialogDescription>
+          </DialogHeader>
+          <PaymentInfo />
+          <DialogFooter>
+            <Button onClick={() => setOpen(false)}>Entendido</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
 
 function FullScreen({ children }: { children: ReactNode }) {
   return (
-    <div className="grid min-h-screen place-items-center bg-background px-4">
+    <div className="grid min-h-screen place-items-center px-4">
       <div className="flex max-w-md flex-col items-center gap-4 text-center">{children}</div>
     </div>
   );
@@ -402,24 +390,31 @@ function DataGate({ children }: { children: ReactNode }) {
     );
   }
 
-  if (membership?.state === "suspendida") {
+  if (membership && isBlocked(membership)) {
     return (
       <FullScreen>
-        <Ban className="size-8 text-destructive" />
-        <h2 className="text-xl font-semibold">Cuenta suspendida</h2>
-        {membership.suspendedReason && <p className="text-sm text-muted-foreground">{membership.suspendedReason}</p>}
+        <CreditCard className="size-8 text-gold" />
+        <h2 className="text-xl font-semibold">Realiza tu pago para continuar</h2>
         <p className="text-sm text-muted-foreground">
-          Tus datos se conservan. Para reactivarla, registra el pago de tu plan {PLAN_NAMES[membership.plan]}
-          {membership.price > 0 && ` (${mxn(membership.price)})`}.
+          {membership.state === "suspendida" ? "Tu cuenta está suspendida." : "Tu membresía venció."} Tus datos se conservan: en cuanto
+          registremos tu pago, el sistema se reactiva.
+          {profile?.role !== "dueno" && " Avísale al dueño del negocio."}
         </p>
+        {membership.suspendedReason && <p className="text-sm text-muted-foreground">Motivo: {membership.suspendedReason}</p>}
+        <div>
+          <p className="text-3xl font-semibold tabular">{mxn(amountDue(membership))}</p>
+          <p className="text-xs text-muted-foreground">{dueLabel(membership)}</p>
+        </div>
         <PaymentInfo />
-        <div className="flex gap-2">
+        <div className="flex flex-wrap justify-center gap-2">
           <Button onClick={() => void init()}>
             <RefreshCw /> Revisar de nuevo
           </Button>
           <Button variant="outline" onClick={() => void signOut()}>
             <LogOut /> Cerrar sesión
           </Button>
+          {/* El administrador de la plataforma puede reactivarse a sí mismo */}
+          <AdminLink />
         </div>
       </FullScreen>
     );
@@ -431,13 +426,9 @@ function DataGate({ children }: { children: ReactNode }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const role = useErp((s) => s.role);
-  const membership = useErp((s) => s.membership);
-  const plans = useErp((s) => s.plans);
   const businessName = useBusinessName();
   const [open, setOpen] = useState(false);
   const locked = role !== "dueno" && OWNER_ONLY.some((p) => pathname.startsWith(p));
-  const gated = NAV_ITEMS.find((i) => i.module && isActive(i.href, pathname))?.module;
-  const upgrade = membership && gated && !hasModule(membership, gated) ? minPlanFor(plans, gated) : undefined;
 
   if (BARE_PATHS.includes(pathname)) return <>{children}</>;
 
@@ -445,13 +436,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     <DataGate>
       <AccentTheme />
       <div className="min-h-screen">
-        <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-sidebar-border print:hidden lg:block">
+        <aside className="fixed inset-y-3 left-3 z-30 hidden w-64 overflow-hidden rounded-[26px] border border-sidebar-border shadow-[0_24px_60px_-30px_rgb(4_2_10/0.6)] backdrop-blur-xl backdrop-saturate-150 print:hidden lg:block">
           <SidebarBody />
         </aside>
-        <div className="lg:pl-64">
+        <div className="lg:pl-[17.5rem]">
           <div className="sticky top-0 z-20 print:hidden">
             <MembershipNotice />
-            <header className="flex h-14 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur md:px-6">
+            <header className="mx-3 mt-3 flex h-14 items-center gap-3 rounded-[20px] border bg-background/55 px-3 shadow-[0_24px_60px_-30px_rgb(4_2_10/0.6)] inset-shadow-[0_1px_0_rgb(255_255_255/0.08)] backdrop-blur-xl backdrop-saturate-150 md:px-4 lg:ml-0">
               <Sheet open={open} onOpenChange={setOpen}>
                 <SheetTrigger asChild>
                   <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Abrir menú">
@@ -465,16 +456,17 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Sheet>
               <div className="flex min-w-0 items-center gap-2 lg:hidden">
                 <BrandMark className="size-7 text-xs" />
-                <span className="truncate font-display text-lg font-semibold uppercase tracking-[0.16em]">{businessName}</span>
+                <span className="truncate font-display text-base font-bold uppercase tracking-[0.08em]">{businessName}</span>
               </div>
               <div className="ml-auto flex items-center gap-1.5">
+                <AdminLink />
                 <ThemeToggle />
                 <UserMenu />
               </div>
             </header>
           </div>
           <main className="mx-auto w-full max-w-[1400px] px-4 py-6 md:px-6 md:py-8">
-            {locked ? <Restricted /> : upgrade ? <Upgrade plan={upgrade.name} /> : children}
+            {locked ? <Restricted /> : children}
           </main>
         </div>
       </div>

@@ -1,17 +1,16 @@
 "use client";
 
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ChangeEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { fDateTime, mxn } from "@/lib/format";
-import { PLAN_NAMES } from "@/lib/membership";
+import { bankFromClabe, clabeError, onlyDigits } from "@/lib/clabe";
+import { fDate, fDateTime, mxn } from "@/lib/format";
 import { supabase } from "@/lib/supabase/client";
-import type { MembershipState, PlanTier } from "@/lib/types";
+import type { MembershipState } from "@/lib/types";
 
 /** Fila de `admin_businesses()`. */
 export type AdminBusiness = {
@@ -19,8 +18,6 @@ export type AdminBusiness = {
   name: string;
   owner_name: string | null;
   owner_email: string | null;
-  plan: PlanTier;
-  effective_plan: PlanTier;
   state: MembershipState;
   ends_at: string | null;
   trial_ends_at: string | null;
@@ -32,15 +29,23 @@ export type AdminBusiness = {
   created_at: string;
 };
 
-export type Action = "pagar" | "mejorar" | "degradar" | "suspender" | "historial";
+/** Fila única de `platform_settings`, con los precios ya como número. */
+export type PlatformSettings = {
+  price_monthly: number;
+  price_setup: number;
+  bank: string;
+  clabe: string;
+  holder: string;
+  whatsapp: string;
+};
+
+export type Action = "pagar" | "suspender" | "historial";
 
 type Event = {
   id: string;
   at: string;
   actor_email: string | null;
   action: string;
-  from_plan: PlanTier | null;
-  to_plan: PlanTier | null;
   paid_until: string | null;
   amount: number | null;
   note: string | null;
@@ -51,10 +56,12 @@ type Props = { biz: AdminBusiness; onClose: () => void; onDone: () => void };
 
 export function ActionDialog({
   target,
+  settings,
   onClose,
   onDone,
 }: {
   target: { biz: AdminBusiness; action: Action } | null;
+  settings: PlatformSettings | null;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -66,11 +73,72 @@ export function ActionDialog({
       <DialogContent className="sm:max-w-lg">
         {action === "historial" ? (
           <History {...props} />
-        ) : action === "pagar" || action === "mejorar" ? (
-          <Pay {...props} upgrade={action === "mejorar"} />
+        ) : action === "pagar" ? (
+          <Pay {...props} settings={settings} />
         ) : (
-          <Confirm {...props} suspend={action === "suspender"} />
+          <Suspend {...props} />
         )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Precios y datos de cobro: los negocios los ven en Membresía y en la pantalla de pago. */
+export function SettingsDialog({ settings, onClose, onDone }: { settings: PlatformSettings; onClose: () => void; onDone: () => void }) {
+  const [form, setForm] = useState({ ...settings, price_monthly: String(settings.price_monthly), price_setup: String(settings.price_setup) });
+  const set = (k: keyof typeof form) => (e: ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value });
+  const clabe = onlyDigits(form.clabe);
+  const clabeErr = clabeError(form.clabe);
+  const monthly = Number(form.price_monthly);
+  const setup = Number(form.price_setup);
+  const invalid = !!clabeErr || form.price_monthly === "" || form.price_setup === "" || !(monthly >= 0) || !(setup >= 0);
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <Shell
+          title="Datos de cobro"
+          description="Los negocios los ven en Configuración → Membresía y en la pantalla de pago."
+          label="Guardar"
+          disabled={invalid}
+          run={() =>
+            supabase()
+              .from("platform_settings")
+              .update({
+                price_monthly: monthly,
+                price_setup: setup,
+                bank: form.bank.trim() || (bankFromClabe(clabe) ?? ""),
+                clabe,
+                holder: form.holder.trim(),
+                whatsapp: form.whatsapp.trim(),
+              })
+              .eq("id", true)
+              .select()
+              .single()
+          }
+          ok="Datos de cobro guardados"
+          onClose={onClose}
+          onDone={onDone}
+        >
+          <div className="grid gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Mensualidad (MXN)">
+                {(id) => <Input id={id} type="number" min={0} value={form.price_monthly} onChange={set("price_monthly")} />}
+              </Field>
+              <Field label="Alta, pago único (MXN)">
+                {(id) => <Input id={id} type="number" min={0} value={form.price_setup} onChange={set("price_setup")} />}
+              </Field>
+            </div>
+            <Field label="CLABE">
+              {(id) => <Input id={id} inputMode="numeric" value={form.clabe} onChange={set("clabe")} aria-invalid={!!clabeErr} placeholder="18 dígitos" />}
+            </Field>
+            {clabeErr && <p className="-mt-2 text-xs text-destructive">{clabeErr}</p>}
+            <Field label="Banco">
+              {(id) => <Input id={id} value={form.bank} onChange={set("bank")} placeholder={bankFromClabe(clabe) ?? "Se toma de la CLABE"} />}
+            </Field>
+            <Field label="Titular">{(id) => <Input id={id} value={form.holder} onChange={set("holder")} />}</Field>
+            <Field label="WhatsApp">{(id) => <Input id={id} inputMode="tel" value={form.whatsapp} onChange={set("whatsapp")} placeholder="10 dígitos" />}</Field>
+          </div>
+        </Shell>
       </DialogContent>
     </Dialog>
   );
@@ -139,45 +207,42 @@ function Field({ label, children }: { label: string; children: (id: string) => R
   );
 }
 
-/** "Marcar como pagado" y "Mejorar" comparten meses, monto y nota; mejorar suma el plan. */
-function Pay({ biz, upgrade, onClose, onDone }: Props & { upgrade: boolean }) {
-  const [plan, setPlan] = useState<PlanTier>("plus");
-  const [months, setMonths] = useState(upgrade ? "0" : "1");
-  const [amount, setAmount] = useState("0");
-  const [note, setNote] = useState("");
+/** Marcar como pagado: el monto se sugiere con la mensualidad por mes, más el alta si es el primer pago. */
+function Pay({ biz, settings, onClose, onDone }: Props & { settings: PlatformSettings | null }) {
+  const first = !biz.paid_until;
+  const monthly = settings?.price_monthly ?? 0;
+  const setupFee = settings?.price_setup ?? 0;
+  const suggested = (months: number) => (months >= 1 ? months * monthly + (first ? setupFee : 0) : 0);
+  const [months, setMonths] = useState("1");
+  const [amount, setAmount] = useState(String(suggested(1)));
+  const [note, setNote] = useState(first ? "Alta + primera mensualidad" : "");
   const m = Math.floor(Number(months));
-  const args = { p_business: biz.id, p_months: m, p_amount: Number(amount) || 0, p_note: note.trim() || null };
   return (
     <Shell
-      title={upgrade ? "Mejorar plan" : "Marcar como pagado"}
-      description={biz.name}
-      label={upgrade ? "Mejorar" : "Marcar pagado"}
-      disabled={upgrade ? !(m >= 0) : !(m >= 1)}
-      run={() => supabase().rpc(upgrade ? "admin_set_plan" : "admin_mark_paid", upgrade ? { ...args, p_plan: plan } : args)}
-      ok={upgrade ? "Plan actualizado" : "Pago registrado"}
+      title="Marcar como pagado"
+      description={first ? `${biz.name} · primer pago: incluye el alta de ${mxn(setupFee)}` : biz.name}
+      label="Marcar pagado"
+      disabled={!(m >= 1)}
+      run={() => supabase().rpc("admin_mark_paid", { p_business: biz.id, p_months: m, p_amount: Number(amount) || 0, p_note: note.trim() || null })}
+      ok="Pago registrado"
       onClose={onClose}
       onDone={onDone}
     >
       <div className="grid gap-3">
-        {upgrade && (
-          <Field label="Plan">
-            {(id) => (
-              <Select value={plan} onValueChange={(v) => setPlan(v as PlanTier)}>
-                <SelectTrigger id={id} className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="plus">{PLAN_NAMES.plus}</SelectItem>
-                  <SelectItem value="pro">{PLAN_NAMES.pro}</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          </Field>
-        )}
         <div className="grid grid-cols-2 gap-3">
-          <Field label={upgrade ? "Meses pagados (opcional)" : "Meses"}>
+          <Field label="Meses">
             {(id) => (
-              <Input id={id} type="number" min={upgrade ? 0 : 1} step={1} value={months} onChange={(e) => setMonths(e.target.value)} />
+              <Input
+                id={id}
+                type="number"
+                min={1}
+                step={1}
+                value={months}
+                onChange={(e) => {
+                  setMonths(e.target.value);
+                  setAmount(String(suggested(Math.floor(Number(e.target.value)))));
+                }}
+              />
             )}
           </Field>
           <Field label="Monto (MXN)">
@@ -192,34 +257,22 @@ function Pay({ biz, upgrade, onClose, onDone }: Props & { upgrade: boolean }) {
   );
 }
 
-/** Degradar a Lite o suspender (este último pide motivo). */
-function Confirm({ biz, suspend, onClose, onDone }: Props & { suspend: boolean }) {
+function Suspend({ biz, onClose, onDone }: Props) {
   const [reason, setReason] = useState("");
   return (
     <Shell
-      title={suspend ? "Suspender negocio" : "Degradar a Lite"}
-      description={
-        suspend
-          ? `${biz.name} no podrá usar el sistema; sus datos se conservan.`
-          : `${biz.name} pierde los módulos de pago y su vencimiento se borra.`
-      }
-      label={suspend ? "Suspender" : "Degradar"}
+      title="Suspender negocio"
+      description={`${biz.name} verá solo la pantalla de pago; sus datos se conservan y puedes reactivarlo cuando quieras.`}
+      label="Suspender"
       destructive
-      disabled={suspend && !reason.trim()}
-      run={() =>
-        suspend
-          ? supabase().rpc("admin_suspend", { p_business: biz.id, p_reason: reason.trim() })
-          : supabase().rpc("admin_set_plan", { p_business: biz.id, p_plan: "lite" })
-      }
-      ok={suspend ? "Negocio suspendido" : "Plan degradado a Lite"}
+      run={() => supabase().rpc("admin_suspend", { p_business: biz.id, p_reason: reason.trim() })}
+      ok="Negocio suspendido"
       onClose={onClose}
       onDone={onDone}
     >
-      {suspend && (
-        <Field label="Motivo (obligatorio)">
-          {(id) => <Input id={id} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Falta de pago, abuso…" />}
-        </Field>
-      )}
+      <Field label="Motivo (opcional, lo ve el negocio)">
+        {(id) => <Input id={id} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Falta de pago, prueba…" />}
+      </Field>
     </Shell>
   );
 }
@@ -251,7 +304,7 @@ function History({ biz }: Props) {
               <TableRow>
                 <TableHead>Fecha</TableHead>
                 <TableHead>Acción</TableHead>
-                <TableHead>Plan</TableHead>
+                <TableHead>Pagado hasta</TableHead>
                 <TableHead className="text-right">Monto</TableHead>
                 <TableHead>Nota</TableHead>
               </TableRow>
@@ -264,9 +317,7 @@ function History({ biz }: Props) {
                     <div className="text-xs text-muted-foreground">{e.actor_email}</div>
                   </TableCell>
                   <TableCell>{e.action}</TableCell>
-                  <TableCell className="whitespace-nowrap">
-                    {e.to_plan ? `${e.from_plan ? `${PLAN_NAMES[e.from_plan]} → ` : ""}${PLAN_NAMES[e.to_plan]}` : "—"}
-                  </TableCell>
+                  <TableCell className="whitespace-nowrap">{e.paid_until ? fDate(e.paid_until) : "—"}</TableCell>
                   <TableCell className="text-right">{e.amount ? mxn(e.amount) : "—"}</TableCell>
                   <TableCell>{e.note ?? "—"}</TableCell>
                 </TableRow>

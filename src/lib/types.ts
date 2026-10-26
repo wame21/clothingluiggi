@@ -231,29 +231,24 @@ export interface ErpData {
   expenses: Expense[];
 }
 
-export type PlanTier = "lite" | "plus" | "pro";
-
-export type ModuleKey = "panel" | "pos" | "pedidos" | "inventario" | "clientes" | "mayoreo" | "finanzas" | "reportes";
-
 export type MembershipState = "prueba" | "activa" | "gracia" | "vencida" | "suspendida";
 
-/** Membresía del negocio calculada por la base (`my_membership`); `modules` son los del plan efectivo. */
+/** Datos para pagar la membresía; los edita el administrador de la plataforma. */
+export interface PaymentDetails {
+  bank: string;
+  clabe: string;
+  holder: string;
+  whatsapp: string;
+}
+
+/** Membresía del negocio calculada por la base (`my_membership`), con los precios y datos de cobro vigentes. */
 export interface Membership {
-  plan: PlanTier;
-  effectivePlan: PlanTier;
   state: MembershipState;
   trialEndsAt: string | null;
   paidUntil: string | null;
   graceEndsAt: string | null;
-  modules: ModuleKey[];
-  price: number;
   suspendedReason: string | null;
-}
-
-/** Fila del catálogo `plans`. */
-export interface Plan {
-  id: PlanTier;
-  name: string;
-  price: number;
-  modules: ModuleKey[];
+  priceMonthly: number;
+  priceSetup: number;
+  payment: PaymentDetails;
 }

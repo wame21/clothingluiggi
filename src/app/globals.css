@@ -53,13 +53,14 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Tema por defecto: negro y dorado. El color de acento del negocio sobrescribe --gold, --ring y --sidebar-primary desde app-shell */
+/* Tema "Glass Atelier": paneles de vidrio sobre fondo con luces (--backdrop). El color de acento del negocio
+   sobrescribe --gold, --ring y --sidebar-primary desde app-shell; --backdrop toma --gold para su luz principal */
 :root {
-  --background: oklch(0.982 0.004 85);
+  --background: #f4f1f6;
   --foreground: oklch(0.17 0.008 75);
-  --card: oklch(1 0 0);
+  --card: rgb(255 255 255 / 62%);
   --card-foreground: oklch(0.17 0.008 75);
-  --popover: oklch(1 0 0);
+  --popover: rgb(255 255 255 / 92%);
   --popover-foreground: oklch(0.17 0.008 75);
   --primary: oklch(0.17 0.008 75);
   --primary-foreground: oklch(0.97 0.01 85);
@@ -70,8 +71,8 @@
   --accent: oklch(0.95 0.025 85);
   --accent-foreground: oklch(0.25 0.03 75);
   --destructive: oklch(0.577 0.215 27);
-  --border: oklch(0.905 0.008 85);
-  --input: oklch(0.89 0.008 85);
+  --border: rgb(23 18 29 / 10%);
+  --input: rgb(23 18 29 / 14%);
   --ring: oklch(0.72 0.12 80);
   --gold: oklch(0.66 0.12 78);
   --gold-foreground: oklch(0.16 0.01 75);
@@ -83,38 +84,43 @@
   --ch-instagram: oklch(0.6 0.2 355);
   --ch-whatsapp: oklch(0.66 0.16 150);
   --ch-mayoreo: oklch(0.45 0.17 300);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.14 0.006 75);
+  --radius: 0.875rem;
+  --sidebar: rgb(18 14 24 / 86%);
   --sidebar-foreground: oklch(0.88 0.01 85);
   --sidebar-primary: oklch(0.8 0.12 85);
   --sidebar-primary-foreground: oklch(0.14 0.006 75);
-  --sidebar-accent: oklch(0.21 0.01 75);
+  --sidebar-accent: rgb(255 255 255 / 11%);
   --sidebar-accent-foreground: oklch(0.97 0.01 85);
-  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-border: rgb(255 255 255 / 12%);
   --sidebar-ring: oklch(0.72 0.12 80);
+  --backdrop:
+    radial-gradient(720px circle at 6% 0%, rgb(122 47 143 / 16%), transparent 70%),
+    radial-gradient(760px circle at 100% 32%, color-mix(in oklab, var(--gold) 22%, transparent), transparent 70%),
+    radial-gradient(680px circle at 42% 100%, rgb(181 55 95 / 14%), transparent 70%),
+    radial-gradient(620px circle at 88% 96%, rgb(31 111 120 / 14%), transparent 70%);
 }
 
 .dark {
-  --background: oklch(0.135 0.005 75);
-  --foreground: oklch(0.95 0.008 85);
-  --card: oklch(0.175 0.006 75);
-  --card-foreground: oklch(0.95 0.008 85);
-  --popover: oklch(0.19 0.006 75);
-  --popover-foreground: oklch(0.95 0.008 85);
-  --primary: oklch(0.8 0.12 85);
-  --primary-foreground: oklch(0.14 0.006 75);
-  --secondary: oklch(0.23 0.008 75);
-  --secondary-foreground: oklch(0.95 0.008 85);
-  --muted: oklch(0.22 0.007 75);
-  --muted-foreground: oklch(0.68 0.012 80);
-  --accent: oklch(0.26 0.02 80);
-  --accent-foreground: oklch(0.95 0.008 85);
+  --background: #0d0a12;
+  --foreground: #f3f0f5;
+  --card: rgb(255 255 255 / 6%);
+  --card-foreground: #f3f0f5;
+  --popover: rgb(27 21 34 / 90%);
+  --popover-foreground: #f3f0f5;
+  --primary: #e0b252;
+  --primary-foreground: #1a1206;
+  --secondary: rgb(255 255 255 / 8%);
+  --secondary-foreground: #f3f0f5;
+  --muted: rgb(255 255 255 / 6%);
+  --muted-foreground: rgb(255 255 255 / 66%);
+  --accent: rgb(255 255 255 / 10%);
+  --accent-foreground: #ffffff;
   --destructive: oklch(0.68 0.19 22);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.8 0.12 85);
-  --gold: oklch(0.8 0.12 85);
-  --gold-foreground: oklch(0.14 0.006 75);
+  --border: rgb(255 255 255 / 12%);
+  --input: rgb(255 255 255 / 14%);
+  --ring: #e0b252;
+  --gold: #e0b252;
+  --gold-foreground: #1a1206;
   --success: oklch(0.72 0.15 152);
   --warning: oklch(0.8 0.14 70);
   --ch-tienda: oklch(0.67 0.12 78);
@@ -122,14 +128,19 @@
   --ch-instagram: oklch(0.62 0.18 355);
   --ch-whatsapp: oklch(0.66 0.15 150);
   --ch-mayoreo: oklch(0.52 0.16 300);
-  --sidebar: oklch(0.115 0.005 75);
-  --sidebar-foreground: oklch(0.88 0.01 85);
-  --sidebar-primary: oklch(0.8 0.12 85);
-  --sidebar-primary-foreground: oklch(0.14 0.006 75);
-  --sidebar-accent: oklch(0.2 0.01 75);
-  --sidebar-accent-foreground: oklch(0.97 0.01 85);
-  --sidebar-border: oklch(1 0 0 / 7%);
-  --sidebar-ring: oklch(0.8 0.12 85);
+  --sidebar: rgb(255 255 255 / 6%);
+  --sidebar-foreground: rgb(255 255 255 / 88%);
+  --sidebar-primary: #e0b252;
+  --sidebar-primary-foreground: #1a1206;
+  --sidebar-accent: rgb(255 255 255 / 11%);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(255 255 255 / 12%);
+  --sidebar-ring: #e0b252;
+  --backdrop:
+    radial-gradient(720px circle at 6% 0%, rgb(122 47 143 / 55%), transparent 70%),
+    radial-gradient(760px circle at 100% 32%, color-mix(in oklab, var(--gold) 34%, transparent), transparent 70%),
+    radial-gradient(680px circle at 42% 100%, rgb(181 55 95 / 42%), transparent 70%),
+    radial-gradient(620px circle at 88% 96%, rgb(31 111 120 / 48%), transparent 70%);
 }
 
 @layer base {
@@ -138,6 +149,25 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+  /* Luces de fondo fijas detrás de todo (z -1 queda sobre el fondo del lienzo, bajo el contenido) */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: var(--backdrop);
+  }
+  /* Vidrio: desenfoca lo que queda detrás de tarjetas, menús y diálogos */
+  [data-slot="card"],
+  [data-slot="dialog-content"],
+  [data-slot="sheet-content"],
+  [data-slot="popover-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="dropdown-menu-sub-content"],
+  [data-slot="select-content"] {
+    backdrop-filter: blur(24px) saturate(160%);
   }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
@@ -174,6 +204,9 @@
   html,
   body {
     background: white !important;
+  }
+  body::before {
+    display: none;
   }
   body * {
     visibility: hidden;
