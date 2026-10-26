@@ -274,22 +274,15 @@ const PROFILE: Profile = {
 };
 
 const MEMBERSHIP: Membership = {
-  plan: "pro",
-  effectivePlan: "pro",
   state: "prueba",
   trialEndsAt: "2026-03-15T00:00:00Z",
   paidUntil: null,
-  graceEndsAt: "2026-03-18T00:00:00Z",
-  modules: ["panel", "pos", "pedidos", "inventario", "clientes", "mayoreo", "finanzas", "reportes"],
-  price: 499,
+  graceEndsAt: null,
   suspendedReason: null,
+  priceMonthly: 1199,
+  priceSetup: 3599,
+  payment: { bank: "BBVA", clabe: "012180001234567899", holder: "Plataforma", whatsapp: "3310000000" },
 };
-
-/** `price_monthly` llega como texto numérico (numeric de Postgres); se lee ordenado por `sort`. */
-const PLAN_ROWS = [
-  { id: "lite", name: "Lite", price_monthly: "0", modules: ["panel", "pos", "pedidos", "inventario", "clientes"], sort: 0 },
-  { id: "plus", name: "Plus", price_monthly: "299.00", modules: ["panel", "pos", "pedidos", "inventario", "clientes", "mayoreo", "finanzas"], sort: 1 },
-];
 
 const profileRow = (patch: Row = {}): Row => ({
   id: "u-1",
@@ -474,7 +467,6 @@ const SETTINGS_ROWS: Row[] = [
 /** Datos completos de un dueño con negocio configurado. */
 function seedOwner() {
   fake.tables.profiles = [profileRow()];
-  fake.tables.plans = PLAN_ROWS;
   fake.on("rpc.my_membership", () => ok(MEMBERSHIP));
   fake.tables.businesses = [businessRow()];
   fake.tables.branches = [
@@ -641,7 +633,7 @@ describe("init", () => {
     seedOwner();
     await state().init();
     const queried = new Set(fake.calls.filter((c) => c.kind === "table").map((c) => c.name));
-    expect(queried).toEqual(new Set(["profiles", "plans", "businesses", "products", "product_costs", "stock", "movements", "orders", "order_costs", "customers", "quotes", "expenses", "branches", "settings"]));
+    expect(queried).toEqual(new Set(["profiles", "businesses", "products", "product_costs", "stock", "movements", "orders", "order_costs", "customers", "quotes", "expenses", "branches", "settings"]));
     expect(opArgs(tableCalls("profiles")[0], "eq")).toEqual(["id", "u-1"]);
     expect(opArgs(tableCalls("businesses")[0], "eq")).toEqual(["id", BUSINESS_ID]);
   });
@@ -775,27 +767,26 @@ describe("init", () => {
     expect(fake.channels).toHaveLength(0);
   });
 
-  it("guarda la membresía y el catálogo de planes (precio como número, orden por sort)", async () => {
+  it("guarda la membresía", async () => {
     seedOwner();
     await state().init();
     expect(state().membership).toEqual(MEMBERSHIP);
-    expect(state().plans).toEqual([
-      { id: "lite", name: "Lite", price: 0, modules: PLAN_ROWS[0].modules },
-      { id: "plus", name: "Plus", price: 299, modules: PLAN_ROWS[1].modules },
-    ]);
-    expect(opArgs(tableCalls("plans")[0], "order")).toEqual(["sort", { ascending: true }]);
   });
 
-  it("una cuenta suspendida queda lista sin cargar tablas ni suscribirse", async () => {
+  it.each([
+    ["suspendida", "Falta de pago"],
+    ["vencida", null],
+  ] as const)("una cuenta %s queda lista sin cargar tablas ni suscribirse", async (blocked, reason) => {
     seedOwner();
-    fake.on("rpc.my_membership", () => ok({ ...MEMBERSHIP, state: "suspendida", suspendedReason: "Falta de pago" }));
+    fake.on("rpc.my_membership", () => ok({ ...MEMBERSHIP, state: blocked, suspendedReason: reason }));
     await state().init();
 
     expect(state().status).toBe("ready");
-    expect(state().membership?.suspendedReason).toBe("Falta de pago");
+    expect(state().membership?.state).toBe(blocked);
+    expect(state().membership?.suspendedReason).toBe(reason);
     expect(state().business).toBeNull();
     expect(state().products).toEqual([]);
-    expect(new Set(fake.calls.map((c) => c.name))).toEqual(new Set(["profiles", "my_membership", "plans"]));
+    expect(new Set(fake.calls.map((c) => c.name))).toEqual(new Set(["profiles", "my_membership"]));
     expect(fake.channels).toHaveLength(0);
   });
 
@@ -808,15 +799,18 @@ describe("init", () => {
   });
 });
 
-describe("cuenta suspendida durante la sesión", () => {
-  it("el error 'Cuenta suspendida' de cualquier acción vuelve a correr init", async () => {
+describe("cuenta bloqueada durante la sesión", () => {
+  it.each([
+    ["Cuenta suspendida", "suspendida"],
+    ["Membresía vencida", "vencida"],
+  ] as const)("el error '%s' de cualquier acción vuelve a correr init", async (message, blocked) => {
     seedOwner();
     signIn();
-    fake.on("rpc.add_payment", () => fail("Cuenta suspendida"));
-    fake.on("rpc.my_membership", () => ok({ ...MEMBERSHIP, state: "suspendida" }));
+    fake.on("rpc.add_payment", () => fail(message));
+    fake.on("rpc.my_membership", () => ok({ ...MEMBERSHIP, state: blocked }));
 
-    await expect(state().addPayment("o-1", { method: "efectivo", amount: 10 })).rejects.toThrow("Cuenta suspendida");
-    await vi.waitFor(() => expect(state().membership?.state).toBe("suspendida"));
+    await expect(state().addPayment("o-1", { method: "efectivo", amount: 10 })).rejects.toThrow(message);
+    await vi.waitFor(() => expect(state().membership?.state).toBe(blocked));
     expect(state().status).toBe("ready");
     expect(rpcCalls("my_membership")).toHaveLength(1);
   });

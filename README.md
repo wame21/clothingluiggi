@@ -104,3 +104,13 @@ Prueba de humo en Chromium (con `pnpm dev` corriendo y `.env.local` apuntando a 
 ```bash
 pnpm smoke                     # capturas en ./.smoke
 ```
+
+## Datos de demo
+
+Boutique ficticia para grabar demos: 2 sucursales, 13 productos, ~320 pedidos de los últimos 3 meses, clientes, cotizaciones de mayoreo y gastos. Solo corre contra el Supabase **local** y no se puede repetir sin `db reset`:
+
+```bash
+pnpm exec supabase db reset && pnpm db:demo
+```
+
+Entra con `demo@boutique.test` / `Prueba123!` (dueña) o `karla@boutique.test` / `Prueba123!` (vendedora de Plaza Andares). La app debe apuntar al Supabase local: `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321` y la `PUBLISHABLE_KEY` que muestra `pnpm exec supabase status`.

@@ -4,19 +4,17 @@ import { Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PaymentInfo } from "@/components/payment-info";
-import { MODULE_LABEL } from "@/lib/constants";
 import { fDate, mxn } from "@/lib/format";
-import { daysLeft, PLAN_NAMES, STATE_LABELS } from "@/lib/membership";
+import { daysLeft, STATE_LABELS } from "@/lib/membership";
 import { useErp } from "@/lib/store";
-import { cn } from "@/lib/utils";
+
+const INCLUDED = ["Panel general", "Punto de venta", "Pedidos", "Inventario", "Clientes", "Mayoreo", "Finanzas", "Reportes", "Equipo y sucursales"];
 
 export function MembresiaSection() {
   const m = useErp((s) => s.membership);
-  const plans = useErp((s) => s.plans);
   if (!m) return null;
 
-  // Lite es gratis y no vence
-  const ends = m.plan === "lite" ? null : (m.paidUntil ?? m.trialEndsAt);
+  const ends = m.paidUntil ?? m.trialEndsAt;
   const left = daysLeft(ends);
 
   return (
@@ -24,45 +22,31 @@ export function MembresiaSection() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            Plan {PLAN_NAMES[m.plan]}
-            <Badge variant={m.state === "vencida" || m.state === "gracia" ? "destructive" : "secondary"}>{STATE_LABELS[m.state]}</Badge>
+            Membresía
+            <Badge variant={m.state === "gracia" ? "destructive" : "secondary"}>{STATE_LABELS[m.state]}</Badge>
           </CardTitle>
           <CardDescription>
-            {m.effectivePlan !== m.plan && `Hoy usas el plan ${PLAN_NAMES[m.effectivePlan]}. `}
-            {ends
-              ? `${m.state === "vencida" ? "Venció" : "Vence"} el ${fDate(ends)}${left !== null && left > 0 ? ` (${left} ${left === 1 ? "día" : "días"})` : ""}.`
-              : "Sin vencimiento."}
-            {m.price > 0 && ` Mensualidad: ${mxn(m.price)}.`}
+            {ends &&
+              `${left !== null && left <= 0 ? "Venció" : "Vence"} el ${fDate(ends)}${left !== null && left > 0 ? ` (${left} ${left === 1 ? "día" : "días"})` : ""}. `}
+            {mxn(m.priceMonthly)} al mes con todo el sistema
+            {m.paidUntil ? "." : `; al contratar se paga además el alta de ${mxn(m.priceSetup)} (pago único).`}
           </CardDescription>
         </CardHeader>
+        <CardContent>
+          <ul className="grid gap-1.5 text-sm sm:grid-cols-2 md:grid-cols-3">
+            {INCLUDED.map((k) => (
+              <li key={k} className="flex items-center gap-2">
+                <Check className="size-3.5 text-gold" /> {k}
+              </li>
+            ))}
+          </ul>
+        </CardContent>
       </Card>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        {plans.map((p) => (
-          <Card key={p.id} className={cn(p.id === m.plan && "ring-2 ring-gold")}>
-            <CardHeader>
-              <CardTitle>{p.name}</CardTitle>
-              <CardDescription>{p.price > 0 ? `${mxn(p.price)} al mes` : "Gratis"}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ul className="grid gap-1.5 text-sm">
-                {p.modules.map((k) => (
-                  <li key={k} className="flex items-center gap-2">
-                    <Check className="size-3.5 text-gold" /> {MODULE_LABEL[k]}
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Cómo pagar</CardTitle>
-          <CardDescription>
-            Haz tu transferencia y avísanos: registramos el pago y tu vencimiento se actualiza. Equipo y Configuración van incluidos en todos los planes.
-          </CardDescription>
+          <CardDescription>Haz tu transferencia y avísanos: registramos el pago y tu vencimiento se actualiza.</CardDescription>
         </CardHeader>
         <CardContent>
           <PaymentInfo />

@@ -357,7 +357,7 @@ const { error: rmErr } = await ownerA.db.storage.from("logos").remove([`${bizA.i
 check("dueño borra su propio logotipo", !rmErr, rmErr?.message);
 
 // ---------------------------------------------------------------------------
-// Membresías: prueba, gracia, Lite, pago manual y suspensión (las fechas se mueven con la llave de servicio)
+// Membresía: prueba, gracia, bloqueo al vencer, pago manual y suspensión (las fechas se mueven con la llave de servicio)
 // ---------------------------------------------------------------------------
 const admin = await platformAdmin(mail("admin"));
 const ownerM = await user(mail("dueno-m"), { name: "Dueña Mu", business_name: "Boutique Mu" });
@@ -365,7 +365,7 @@ const { data: bizM } = await ownerM.db.from("businesses").select("id").single();
 const mem = async (db) => (await db.rpc("my_membership")).data;
 const setBiz = (fields) => service.from("businesses").update(fields).eq("id", bizM.id);
 const daysAgo = (d) => new Date(Date.now() - d * 864e5).toISOString();
-const bizState = async (id) => (await service.from("businesses").select("plan, paid_until, suspended_at, trial_ends_at").eq("id", id).single()).data;
+const bizState = async (id) => (await service.from("businesses").select("paid_until, suspended_at, trial_ends_at").eq("id", id).single()).data;
 
 const { data: pM } = await ownerM.db.from("products").insert({ sku: "M-001", name: "Polo Mu", category: "Polos", price: 599, sizes: ["M"], colors, woo_id: 1 }).select().single();
 const vkM = `${pM.id}|Negro|M`;
@@ -378,50 +378,45 @@ const expenseM = () => ownerM.db.from("expenses").insert({ category: "otros", de
 
 const m0 = await mem(ownerM.db);
 const trialDays = (new Date(m0?.trialEndsAt) - Date.now()) / 864e5;
-check("negocio nuevo empieza en prueba de Pro de 14 días", m0?.state === "prueba" && m0.plan === "pro" && m0.effectivePlan === "pro" && trialDays > 13.9 && trialDays <= 14, `${m0?.state}/${m0?.effectivePlan} ${trialDays}`);
-check("la prueba incluye Reportes", m0?.modules.includes("reportes") && m0.modules.length === 8);
-const { data: plansM } = await ownerM.db.from("plans").select("id, modules").order("sort");
-check("los planes se leen y van de Lite a Pro", plansM?.map((p) => p.id).join() === "lite,plus,pro" && plansM[0].modules.length === 5);
-await expectDenied("nadie edita el catálogo de planes", ownerM.db.from("plans").update({ price_monthly: 1 }).eq("id", "pro").select());
+check("negocio nuevo empieza en prueba de 14 días", m0?.state === "prueba" && m0.paidUntil === null && trialDays > 13.9 && trialDays <= 14, `${m0?.state} ${trialDays}`);
 await expectError("la app no lee platform_admins", ownerM.db.from("platform_admins").select("user_id"));
 await expectError("la app no lee membership_events", ownerM.db.from("membership_events").select("id"));
 check("durante la prueba hay Mayoreo y Finanzas", !(await quoteM()).error && !(await expenseM()).error);
 const { data: qM } = await quoteM();
 
-// Prueba vencida → Lite: Mayoreo y Finanzas se rechazan, vender y pedir sigue
+// Prueba vencida sin pago: la cuenta se bloquea igual que una suspendida
 await setBiz({ trial_ends_at: daysAgo(0.05) });
 const m1 = await mem(ownerM.db);
-check("prueba vencida → vencida con plan efectivo Lite", m1?.state === "vencida" && m1.plan === "pro" && m1.effectivePlan === "lite" && m1.modules.length === 5, `${m1?.state}/${m1?.effectivePlan}`);
-await expectError("Lite no guarda cotizaciones", quoteM(), /Tu plan no incluye Mayoreo/);
-await expectError("Lite no convierte cotizaciones", ownerM.db.rpc("convert_quote", { p_quote: qM.id, p_deposit: {} }), /Tu plan no incluye Mayoreo/);
-await expectDenied("Lite no cambia el estado de cotizaciones", ownerM.db.from("quotes").update({ status: "aceptada" }).eq("id", qM.id).select());
-await expectError("Lite no registra gastos", expenseM());
-check("Lite sigue leyendo sus gastos", ((await ownerM.db.from("expenses").select("id")).data?.length ?? 0) >= 1);
-check("Lite sigue vendiendo", !(await sellM()).error);
-check("Lite conserva y lee sus cotizaciones", (await ownerM.db.from("quotes").select("id")).data?.length === 2);
+check("prueba vencida → vencida", m1?.state === "vencida" && m1.paidUntil === null, m1?.state);
+await expectError("vencida no vende", sellM(), /Membresía vencida/);
+await expectError("vencida no cotiza", quoteM(), /Membresía vencida/);
+await expectError("vencida no convierte cotizaciones", ownerM.db.rpc("convert_quote", { p_quote: qM.id, p_deposit: {} }), /Membresía vencida/);
+await expectDenied("vencida no cambia el estado de cotizaciones", ownerM.db.from("quotes").update({ status: "aceptada" }).eq("id", qM.id).select());
+await expectError("vencida no registra gastos", expenseM());
+check("vencida no lee sus tablas", (await ownerM.db.from("products").select("id")).data?.length === 0 && (await ownerM.db.from("quotes").select("id")).data?.length === 0);
+check("vencida sigue leyendo su perfil", (await ownerM.db.from("profiles").select("role").eq("id", ownerM.id)).data?.[0]?.role === "dueno");
 
-// Plan pagado vencido: 3 días de gracia con el plan, después Lite sin bloqueo
+// Periodo pagado vencido: 3 días de gracia con todo el sistema, después bloqueo
 await setBiz({ paid_until: daysAgo(1) });
 const m2 = await mem(ownerM.db);
 const graceMs = new Date(m2?.graceEndsAt) - new Date(m2?.paidUntil);
-check("en gracia conserva el plan y avisa cuándo termina", m2?.state === "gracia" && m2.effectivePlan === "pro" && graceMs === 3 * 864e5, `${m2?.state}/${m2?.effectivePlan}`);
-check("en gracia sigue con Mayoreo y Finanzas", !(await quoteM()).error && !(await expenseM()).error);
+check("en gracia avisa cuándo termina", m2?.state === "gracia" && graceMs === 3 * 864e5, m2?.state);
+check("en gracia sigue vendiendo, cotizando y con Finanzas", !(await sellM()).error && !(await quoteM()).error && !(await expenseM()).error);
 await setBiz({ paid_until: daysAgo(4) });
 const m3 = await mem(ownerM.db);
-check("pasada la gracia baja a Lite sin bloquear", m3?.state === "vencida" && m3.effectivePlan === "lite", `${m3?.state}/${m3?.effectivePlan}`);
-await expectError("pasada la gracia no hay Mayoreo", quoteM(), /Tu plan no incluye Mayoreo/);
-check("pasada la gracia sigue vendiendo", !(await sellM()).error);
+check("pasada la gracia queda vencida", m3?.state === "vencida", m3?.state);
+await expectError("pasada la gracia no vende", sellM(), /Membresía vencida/);
 
-// Marcar pagado: el periodo corre desde el pago y recupera todo
+// Marcar pagado: el periodo corre desde el pago y desbloquea
 await expectError("no se marcan 0 meses", admin.db.rpc("admin_mark_paid", { p_business: bizM.id, p_months: 0, p_amount: 100, p_note: null }), /Meses inválidos/);
 await expectError("meses nulos se rechazan al marcar pagado", admin.db.rpc("admin_mark_paid", { p_business: bizM.id, p_months: null, p_amount: 100, p_note: null }), /Meses inválidos/);
-await expectError("meses nulos se rechazan al cambiar el plan", admin.db.rpc("admin_set_plan", { p_business: bizM.id, p_plan: "pro", p_months: null }), /Meses inválidos/);
-const { error: payErr } = await admin.db.rpc("admin_mark_paid", { p_business: bizM.id, p_months: 1, p_amount: 100, p_note: "Transferencia" });
+const { error: payErr } = await admin.db.rpc("admin_mark_paid", { p_business: bizM.id, p_months: 1, p_amount: 4798, p_note: "Alta + primera mensualidad" });
 const m4 = await mem(ownerM.db);
 const paidDays = (new Date(m4?.paidUntil) - Date.now()) / 864e5;
-check("marcar pagado cuenta el mes desde hoy y activa el plan", !payErr && m4?.state === "activa" && m4.effectivePlan === "pro" && paidDays > 27 && paidDays < 32, payErr?.message ?? `${m4?.state} ${paidDays}`);
-check("tras pagar vuelven Mayoreo y Finanzas", !(await quoteM()).error && !(await expenseM()).error);
-await admin.db.rpc("admin_mark_paid", { p_business: bizM.id, p_months: 1, p_amount: 100, p_note: null });
+check("marcar pagado cuenta el mes desde hoy y desbloquea", !payErr && m4?.state === "activa" && paidDays > 27 && paidDays < 32, payErr?.message ?? `${m4?.state} ${paidDays}`);
+check("tras pagar vuelve a vender, cotizar y registrar gastos", !(await sellM()).error && !(await quoteM()).error && !(await expenseM()).error);
+check("tras pagar conserva sus cotizaciones", (await ownerM.db.from("quotes").select("id")).data?.length === 4);
+await admin.db.rpc("admin_mark_paid", { p_business: bizM.id, p_months: 1, p_amount: 1199, p_note: null });
 const m5 = await mem(ownerM.db);
 const stepDays = (new Date(m5?.paidUntil) - new Date(m4?.paidUntil)) / 864e5;
 check("un segundo pago suma desde el vencimiento vigente", stepDays >= 28 && stepDays <= 31, `${stepDays} días`);
@@ -438,39 +433,24 @@ await expectError("suspendido no edita el negocio", ownerM.db.rpc("update_busine
 await expectError("suspendido no administra el equipo", ownerM.db.rpc("set_member", { p_id: ownerM.id, p_role: "vendedor", p_branch: null }), /Cuenta suspendida/);
 await expectError("suspendido no escribe gastos", expenseM());
 const m6 = await mem(ownerM.db);
-check("my_membership responde con la cuenta suspendida", m6?.state === "suspendida" && m6.suspendedReason === "Contracargo" && m6.modules.length === 0, m6?.state);
+check("my_membership responde con la cuenta suspendida", m6?.state === "suspendida" && m6.suspendedReason === "Contracargo", m6?.state);
 check("el perfil propio sigue legible", (await ownerM.db.from("profiles").select("id, role").eq("id", ownerM.id)).data?.[0]?.role === "dueno");
 await admin.db.rpc("admin_reactivate", { p_business: bizM.id });
 const m7 = await mem(ownerM.db);
-check("reactivar devuelve el acceso y el plan", m7?.state === "activa" && m7.suspendedReason === null && !(await sellM()).error && (await ownerM.db.from("products").select("id")).data?.length === 1, m7?.state);
-
-// Degradar conserva los datos; mejorar con pago activa el plan
-const quotesBefore = (await ownerM.db.from("quotes").select("id")).data?.length;
-await admin.db.rpc("admin_set_plan", { p_business: bizM.id, p_plan: "lite" });
-const m8 = await mem(ownerM.db);
-check("degradar a Lite deja activa sin vencimiento", m8?.plan === "lite" && m8.state === "activa" && m8.paidUntil === null && m8.price === 0, `${m8?.plan}/${m8?.state}`);
-check("degradar conserva las cotizaciones", (await ownerM.db.from("quotes").select("id")).data?.length === quotesBefore && quotesBefore >= 3, `${quotesBefore}`);
-await expectError("en Lite no hay Mayoreo", quoteM(), /Tu plan no incluye Mayoreo/);
-await expectError("mejorar sin pago y sin periodo vigente se rechaza", admin.db.rpc("admin_set_plan", { p_business: bizM.id, p_plan: "plus" }), /al menos un mes de pago/);
-const { error: upErr } = await admin.db.rpc("admin_set_plan", { p_business: bizM.id, p_plan: "plus", p_months: 2, p_amount: 500, p_note: "Mejora" });
-const m9 = await mem(ownerM.db);
-check("mejorar a Plus con pago activa Mayoreo y Finanzas sin Reportes", !upErr && m9?.plan === "plus" && m9.state === "activa" && m9.modules.includes("finanzas") && !m9.modules.includes("reportes"), upErr?.message ?? `${m9?.plan}/${m9?.state}`);
-check("con Plus vuelve Mayoreo", !(await quoteM()).error);
+check("reactivar devuelve el acceso", m7?.state === "activa" && m7.suspendedReason === null && !(await sellM()).error && (await ownerM.db.from("products").select("id")).data?.length === 1, m7?.state);
 
 // Permisos: solo el administrador toca las admin_*; anon no ejecuta nada nuevo
 const adminCalls = (db) => [
   ["admin_businesses", {}],
   ["admin_events", { p_business: bizM.id }],
-  ["admin_set_plan", { p_business: bizM.id, p_plan: "pro" }],
   ["admin_mark_paid", { p_business: bizM.id, p_months: 1, p_amount: 0, p_note: null }],
   ["admin_suspend", { p_business: bizM.id, p_reason: "x" }],
   ["admin_reactivate", { p_business: bizM.id }],
 ].map(([fn, args]) => [fn, db.rpc(fn, args)]);
 for (const [fn, call] of adminCalls(ownerM.db)) await expectError(`un dueño no ejecuta ${fn}`, call, /Solo administradores de la plataforma/);
 for (const [fn, call] of adminCalls(anon)) await expectError(`anon no ejecuta ${fn}`, call, /permission denied/);
-for (const [fn, args] of [["my_membership", {}], ["is_platform_admin", {}], ["has_module", { p_module: "pos" }]]) await expectError(`anon no ejecuta ${fn}`, anon.rpc(fn, args), /permission denied/);
+for (const [fn, args] of [["my_membership", {}], ["is_platform_admin", {}]]) await expectError(`anon no ejecuta ${fn}`, anon.rpc(fn, args), /permission denied/);
 check("is_platform_admin distingue al administrador", (await admin.db.rpc("is_platform_admin")).data === true && (await ownerM.db.rpc("is_platform_admin")).data === false);
-check("has_module sigue el plan efectivo", (await ownerM.db.rpc("has_module", { p_module: "finanzas" })).data === true && (await ownerM.db.rpc("has_module", { p_module: "reportes" })).data === false);
 
 // Las acciones solo tocan su negocio y el panel devuelve datos coherentes
 const otherA = await bizState(bizA.id);
@@ -484,12 +464,33 @@ const { data: rows } = await admin.db.rpc("admin_businesses");
 const rowM = rows?.find((r) => r.id === bizM.id);
 const ordersM = (await service.from("orders").select("id", { count: "exact", head: true }).eq("business_id", bizM.id)).count;
 check("admin_businesses lista todos los negocios", [bizA.id, bizB.id, bizM.id].every((id) => rows?.some((r) => r.id === id)), `${rows?.length} filas`);
-check("admin_businesses trae dueño, plan, estado y actividad", rowM?.name === "Boutique Mu" && rowM.owner_email === ownerM.email && rowM.owner_name === "Dueña Mu" && rowM.plan === "plus"
-  && rowM.effective_plan === "plus" && rowM.state === "activa" && new Date(rowM.ends_at).getTime() === new Date(rowM.paid_until).getTime() && rowM.members === 1 && rowM.orders_30d === ordersM && ordersM >= 3, JSON.stringify(rowM));
+check("admin_businesses trae dueño, estado y actividad", rowM?.name === "Boutique Mu" && rowM.owner_email === ownerM.email && rowM.owner_name === "Dueña Mu"
+  && rowM.state === "activa" && new Date(rowM.ends_at).getTime() === new Date(rowM.paid_until).getTime() && rowM.members === 1 && rowM.orders_30d === ordersM && ordersM >= 3, JSON.stringify(rowM));
 const { data: events } = await admin.db.rpc("admin_events", { p_business: bizM.id });
 const actions = events?.map((e) => e.action).reverse().join();
-check("admin_events guarda cada cambio, el más nuevo primero", actions === "pago,pago,suspender,reactivar,degradar,plan,suspender,reactivar" && events[0].action === "reactivar", actions);
-const upEvent = events?.find((e) => e.action === "plan");
-check("el historial registra actor, planes, monto y nota", upEvent?.actor_email === admin.email && upEvent.from_plan === "lite" && upEvent.to_plan === "plus" && Number(upEvent.amount) === 500 && upEvent.note === "Mejora" && !!upEvent.paid_until);
+check("admin_events guarda cada cambio, el más nuevo primero", actions === "pago,pago,suspender,reactivar,suspender,reactivar" && events[0].action === "reactivar", actions);
+const firstPay = events?.find((e) => e.note === "Alta + primera mensualidad");
+check("el historial registra actor, vencimiento, monto y nota", firstPay?.actor_email === admin.email && firstPay.action === "pago" && Number(firstPay.amount) === 4798 && !!firstPay.paid_until);
+
+// Datos de cobro: solo el administrador lee y edita la fila; los negocios la reciben en my_membership
+const cobro = (db) => db.from("platform_settings").select("*");
+const COBRO_INICIAL = { price_monthly: 1199, price_setup: 3599, bank: "", clabe: "", holder: "", whatsapp: "" };
+check("un dueño no lee platform_settings", ((await cobro(ownerM.db)).data?.length ?? 0) === 0);
+await expectError("anon no lee platform_settings", cobro(anon), /permission denied/);
+await expectDenied("un dueño no edita platform_settings", ownerM.db.from("platform_settings").update({ price_monthly: 1 }).eq("id", true).select());
+const { data: cobroAdmin } = await cobro(admin.db);
+check("el administrador lee una sola fila con los precios iniciales", cobroAdmin?.length === 1 && Number(cobroAdmin[0].price_monthly) === 1199 && Number(cobroAdmin[0].price_setup) === 3599, JSON.stringify(cobroAdmin));
+await expectError("no se agrega otra fila de cobro", admin.db.from("platform_settings").insert({ id: false }), /permission denied/);
+const nuevoCobro = { price_monthly: 999, price_setup: 0, bank: "BBVA", clabe: "012180001234567899", holder: "Plataforma", whatsapp: "3310000000" };
+const { error: cobroErr } = await admin.db.from("platform_settings").update(nuevoCobro).eq("id", true).select().single();
+const m10 = await mem(ownerM.db);
+check("el administrador edita el cobro y el negocio lo recibe en my_membership", !cobroErr && m10?.priceMonthly === 999 && m10.priceSetup === 0 && m10.payment.clabe === nuevoCobro.clabe && m10.payment.holder === "Plataforma", cobroErr?.message ?? JSON.stringify(m10));
+await expectError("la CLABE lleva 18 dígitos", admin.db.from("platform_settings").update({ clabe: "123" }).eq("id", true), /platform_settings_clabe_check/);
+await expectError("los precios no son negativos", admin.db.from("platform_settings").update({ price_monthly: -1 }).eq("id", true), /platform_settings_price_monthly_check/);
+await admin.db.rpc("admin_suspend", { p_business: bizM.id, p_reason: null });
+const m11 = await mem(ownerM.db);
+check("con la cuenta suspendida sigue recibiendo a dónde pagar", m11?.state === "suspendida" && m11.payment.bank === "BBVA" && m11.priceMonthly === 999, JSON.stringify(m11));
+await admin.db.rpc("admin_reactivate", { p_business: bizM.id });
+await admin.db.from("platform_settings").update(COBRO_INICIAL).eq("id", true);
 
 report();

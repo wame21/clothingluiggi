@@ -1,25 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { daysLeft, graceNotice, hasModule, minPlanFor, needsPayment } from "./membership";
-import type { Membership, Plan } from "./types";
+import { mxn } from "./format";
+import { amountDue, daysLeft, dueLabel, graceNotice, isBlocked, needsPayment } from "./membership";
+import type { Membership } from "./types";
 
 const NOW = new Date("2026-03-10T12:00:00Z");
 
-const PLANS: Plan[] = [
-  { id: "lite", name: "Lite", price: 0, modules: ["panel"] },
-  { id: "plus", name: "Plus", price: 299, modules: ["panel", "mayoreo"] },
-  { id: "pro", name: "Pro", price: 499, modules: ["panel", "mayoreo", "reportes"] },
-];
-
 const membership = (patch: Partial<Membership> = {}): Membership => ({
-  plan: "pro",
-  effectivePlan: "pro",
   state: "activa",
   trialEndsAt: null,
   paidUntil: "2026-04-10T12:00:00Z",
   graceEndsAt: "2026-04-13T12:00:00Z",
-  modules: ["panel", "mayoreo"],
-  price: 499,
   suspendedReason: null,
+  priceMonthly: 1199,
+  priceSetup: 3599,
+  payment: { bank: "", clabe: "", holder: "", whatsapp: "" },
   ...patch,
 });
 
@@ -43,29 +37,34 @@ describe("daysLeft", () => {
   });
 });
 
-describe("hasModule", () => {
-  it("sin membresía no incluye nada", () => {
-    expect(hasModule(null, "panel")).toBe(false);
+describe("isBlocked", () => {
+  it("bloquea vencida y suspendida", () => {
+    expect(isBlocked(membership({ state: "vencida" }))).toBe(true);
+    expect(isBlocked(membership({ state: "suspendida" }))).toBe(true);
   });
 
-  it("lee los módulos del plan efectivo", () => {
-    expect(hasModule(membership(), "mayoreo")).toBe(true);
-    expect(hasModule(membership(), "reportes")).toBe(false);
+  it("deja pasar prueba, activa, gracia y la membresía sin cargar", () => {
+    for (const state of ["prueba", "activa", "gracia"] as const) expect(isBlocked(membership({ state }))).toBe(false);
+    expect(isBlocked(null)).toBe(false);
   });
 });
 
-describe("minPlanFor", () => {
-  const plans = PLANS;
-
-  it("devuelve el primer plan que incluye el módulo", () => {
-    expect(minPlanFor(plans, "panel")?.id).toBe("lite");
-    expect(minPlanFor(plans, "mayoreo")?.id).toBe("plus");
-    expect(minPlanFor(plans, "reportes")?.id).toBe("pro");
+describe("amountDue", () => {
+  it("el primer pago suma el alta a la mensualidad", () => {
+    expect(amountDue(membership({ state: "prueba", paidUntil: null, graceEndsAt: null }))).toBe(1199 + 3599);
   });
 
-  it("sin catálogo o módulo en ningún plan devuelve undefined", () => {
-    expect(minPlanFor([], "mayoreo")).toBeUndefined();
-    expect(minPlanFor(plans.slice(0, 1), "finanzas")).toBeUndefined();
+  it("con mensualidades registradas solo cobra la mensualidad", () => {
+    expect(amountDue(membership({ state: "vencida" }))).toBe(1199);
+  });
+
+  it("usa los precios que manda la base", () => {
+    expect(amountDue(membership({ paidUntil: null, priceMonthly: 999, priceSetup: 0 }))).toBe(999);
+  });
+
+  it("dueLabel desglosa el alta solo en el primer pago", () => {
+    expect(dueLabel(membership({ paidUntil: null }))).toBe(`Alta ${mxn(3599)} + primera mensualidad ${mxn(1199)}`);
+    expect(dueLabel(membership())).toBe("Mensualidad");
   });
 });
 
@@ -88,22 +87,17 @@ describe("needsPayment", () => {
 
 describe("graceNotice", () => {
   it("en gracia usa la leyenda exacta con la fecha de graceEndsAt", () => {
-    const m = membership({ state: "gracia", modules: ["panel", "mayoreo", "finanzas", "reportes"] });
-    expect(graceNotice(m, PLANS)).toBe(
-      "Si no se registra tu pago antes del 13 de abril de 2026, tu cuenta pasará al plan Lite y se bloquearán Mayoreo, Finanzas y Reportes. Tus datos se conservan.",
+    expect(graceNotice(membership({ state: "gracia" }))).toBe(
+      "Si no se registra tu pago antes del 13 de abril de 2026, el sistema se bloqueará hasta que pagues. Tus datos se conservan.",
     );
-  });
-
-  it("lista solo los módulos que el plan actual pierde en Lite", () => {
-    expect(graceNotice(membership({ state: "gracia" }), PLANS)).toContain("se bloquearán Mayoreo. Tus");
   });
 
   it("en prueba (sin gracia) usa el fin de la prueba", () => {
     const m = membership({ state: "prueba", trialEndsAt: "2026-03-12T12:00:00Z", paidUntil: null, graceEndsAt: null });
-    expect(graceNotice(m, PLANS)).toContain("antes del 12 de marzo de 2026,");
+    expect(graceNotice(m)).toContain("antes del 12 de marzo de 2026,");
   });
 
   it("sin ninguna fecha devuelve vacío", () => {
-    expect(graceNotice(membership({ graceEndsAt: null, trialEndsAt: null }), PLANS)).toBe("");
+    expect(graceNotice(membership({ graceEndsAt: null, trialEndsAt: null }))).toBe("");
   });
 });

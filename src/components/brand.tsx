@@ -44,7 +44,7 @@ export function BrandLockup() {
     <div className="flex items-center gap-3">
       <BrandMark />
       <div className="min-w-0 leading-tight">
-        <div className="truncate font-display text-xl font-semibold uppercase tracking-[0.18em] gold-text">{name}</div>
+        <div className="truncate font-display text-lg font-bold uppercase tracking-[0.08em]">{name}</div>
       </div>
     </div>
   );

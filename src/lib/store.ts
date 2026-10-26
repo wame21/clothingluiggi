@@ -5,7 +5,7 @@ import { useCallback, useMemo } from "react";
 import { create } from "zustand";
 import { activeBranches, applyBranches, posBranches, warehouseOf } from "./branches";
 import { APP_NAME } from "./constants";
-import { hasModule } from "./membership";
+import { isBlocked } from "./membership";
 import {
   applyCatalogSettings,
   applySalesSettings,
@@ -33,7 +33,6 @@ import type {
   Order,
   OrderStatus,
   Payment,
-  Plan,
   Product,
   Profile,
   Quote,
@@ -150,8 +149,6 @@ interface Session {
   live: boolean;
   /** `my_membership()`; `null` hasta que carga (o si la cuenta está pendiente). */
   membership: Membership | null;
-  /** Catálogo `plans`, ordenado por `sort`. */
-  plans: Plan[];
 }
 
 type Data = ErpData & Config;
@@ -184,8 +181,6 @@ const toBusiness = (r: Row): Business => ({
   orderPrefix: r.order_prefix,
   quotePrefix: r.quote_prefix,
 });
-
-const toPlan = (r: Row): Plan => ({ id: r.id, name: r.name, price: num(r.price_monthly), modules: r.modules });
 
 const toBranch = (r: Row): Branch => ({
   id: r.id,
@@ -349,12 +344,12 @@ async function fetchAll(table: string, order: [column: string, ascending: boolea
 /** Devuelve `data` o lanza el mensaje de error de Postgres (p. ej. "Sin existencia suficiente…"). */
 function must<T>(res: { data: T | null; error: { message: string } | null }): T {
   if (res.error) {
-    // La cuenta se suspendió con la sesión abierta: init lleva a la pantalla de suspendida
-    if (res.error.message === "Cuenta suspendida") void useErp.getState().init();
-    // Las escrituras directas por tabla fallan por RLS sin mensaje propio: solo se re-inicia si de verdad está suspendida
+    // La cuenta se bloqueó con la sesión abierta: init lleva a la pantalla de pago
+    if (res.error.message === "Cuenta suspendida" || res.error.message === "Membresía vencida") void useErp.getState().init();
+    // Las escrituras directas por tabla fallan por RLS sin mensaje propio: solo se re-inicia si de verdad está bloqueada
     else if (/row-level security/.test(res.error.message))
       void supabase().rpc("my_membership").then(({ data }) => {
-        if ((data as Membership | null)?.state === "suspendida") void useErp.getState().init();
+        if (isBlocked(data as Membership | null)) void useErp.getState().init();
       });
     throw new Error(res.error.message);
   }
@@ -508,7 +503,6 @@ export const useErp = create<ErpState>()((set, get) => {
     team: [],
     live: false,
     membership: null,
-    plans: [],
 
     init: async () => {
       set({ status: "loading", error: undefined });
@@ -522,10 +516,9 @@ export const useErp = create<ErpState>()((set, get) => {
           set({ status: "ready" });
           return;
         }
-        const [res, plans] = await Promise.all([sb.rpc("my_membership"), fetchAll("plans", [["sort", true]])]);
-        const membership = must(res) as Membership;
-        set({ membership, plans: plans.map(toPlan) });
-        if (membership.state === "suspendida") {
+        const membership = must(await sb.rpc("my_membership")) as Membership;
+        set({ membership });
+        if (isBlocked(membership)) {
           set({ status: "ready" });
           return;
         }
@@ -790,8 +783,8 @@ export function useBranchName() {
   return useCallback((id: BranchId) => branches.find((b) => b.id === id)?.short ?? id, [branches]);
 }
 
-/** Mayoreo disponible: activado en Configuración y incluido en el plan vigente. */
-export const useWholesaleEnabled = () => useErp((s) => s.wholesale.enabled && hasModule(s.membership, "mayoreo"));
+/** Mayoreo disponible: activado en Configuración. */
+export const useWholesaleEnabled = () => useErp((s) => s.wholesale.enabled);
 
 /** Canales de venta del negocio; `mayoreo` solo si el módulo de mayoreo está activo. */
 export function useChannels(): Channel[] {
