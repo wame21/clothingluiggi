@@ -24,12 +24,12 @@ export function BrandMark({ className }: { className?: string }) {
         className,
       )}
     >
-      <div className="grid size-full place-items-center overflow-hidden rounded-full bg-[oklch(0.12_0.005_75)]">
+      <div className="grid size-full place-items-center overflow-hidden rounded-full bg-white dark:bg-[oklch(0.12_0.005_75)]">
         {logoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={logoUrl} alt={name} className="size-full object-cover" />
         ) : (
-          <span className="font-display text-[0.95em] font-semibold leading-none tracking-tight text-[oklch(0.95_0.01_85)]">
+          <span className="font-display text-[0.95em] font-semibold leading-none tracking-tight text-[#1b1620] dark:text-[oklch(0.95_0.01_85)]">
             {initialsOf(name)}
           </span>
         )}

@@ -96,7 +96,7 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen">
-      <header className="m-3 flex items-center justify-between gap-3 rounded-[20px] border border-sidebar-border bg-sidebar px-4 py-3 text-sidebar-foreground shadow-[0_24px_60px_-30px_rgb(4_2_10/0.6)] backdrop-blur-xl backdrop-saturate-150">
+      <header className="m-3 flex items-center justify-between gap-3 rounded-[20px] border border-sidebar-border bg-sidebar bg-(image:--glass-sheen) px-4 py-3 text-sidebar-foreground shadow-(--glass-shadow) backdrop-blur-[28px] backdrop-saturate-[1.85]">
         <BrandLockup />
         <div className="flex shrink-0 items-center gap-2">
           <Button asChild variant="outline" size="sm" className="text-foreground" aria-label="Ir a mi negocio">

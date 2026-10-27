@@ -122,7 +122,7 @@ function AccentTheme() {
     clear();
     if (!accent || !HEX.test(accent)) return;
     const rgb = parseHex(accent);
-    const gold = dark ? toHex(rgb) : toHex(rgb.map((v) => v * 0.82));
+    const gold = dark ? toHex(rgb) : toHex(rgb.map((v) => v * 0.55));
     const set = (name: string, value: string) => root.style.setProperty(name, value);
     set("--gold", gold);
     set("--gold-foreground", onColor(dark ? rgb : parseHex(gold)));
@@ -130,10 +130,8 @@ function AccentTheme() {
     set("--sidebar-primary", toHex(rgb));
     set("--sidebar-primary-foreground", onColor(rgb));
     set("--sidebar-ring", toHex(rgb));
-    if (dark) {
-      set("--primary", toHex(rgb));
-      set("--primary-foreground", onColor(rgb));
-    }
+    set("--primary", toHex(rgb));
+    set("--primary-foreground", onColor(rgb));
     return clear;
   }, [accent, dark]);
 
@@ -158,7 +156,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
     <nav className="flex flex-col gap-6">
       {NAV.map((group) => (
         <div key={group.section} className="flex flex-col gap-1">
-          <div className="px-3 pb-1 text-[10px] font-medium uppercase tracking-[0.2em] text-sidebar-foreground/40">
+          <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/70">
             {group.section}
           </div>
           {group.items.filter((item) => wholesale || !item.wholesaleOnly).map((item) => {
@@ -171,17 +169,17 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
                 href={item.href}
                 onClick={onNavigate}
                 className={cn(
-                  "group flex h-11 items-center gap-3 rounded-[14px] px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                  active && "bg-sidebar-accent font-semibold text-sidebar-accent-foreground inset-shadow-[0_1px_0_rgb(255_255_255/0.14)]",
+                  "group flex h-11 items-center gap-3 rounded-[14px] px-3 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  active && "bg-sidebar-primary/15 font-semibold text-sidebar-accent-foreground inset-ring inset-ring-sidebar-primary/45 hover:bg-sidebar-primary/20",
                   locked && "opacity-50",
                 )}
               >
-                <item.icon className={cn("size-[18px] shrink-0", active ? "text-sidebar-primary" : "text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80")} />
+                <item.icon className={cn("size-[18px] shrink-0", active ? "text-gold" : "text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80")} />
                 <span className="flex-1 truncate">{item.label}</span>
                 {locked ? (
                   <Lock className="size-3.5 text-sidebar-foreground/40" />
                 ) : count > 0 ? (
-                  <span className="rounded-full bg-sidebar-primary/15 px-1.5 py-px text-[11px] font-medium tabular text-sidebar-primary">
+                  <span className="rounded-full bg-sidebar-primary/15 px-1.5 py-px text-[11px] font-medium tabular text-gold">
                     {count}
                   </span>
                 ) : null}
@@ -197,7 +195,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
   const live = useErp((s) => s.live);
   return (
-    <div className="flex h-full flex-col gap-8 bg-sidebar px-3 py-5 text-sidebar-foreground">
+    <div className="flex h-full flex-col gap-8 px-3 py-5 text-sidebar-foreground">
       <div className="px-2">
         <BrandLockup />
       </div>
@@ -436,20 +434,20 @@ export function AppShell({ children }: { children: ReactNode }) {
     <DataGate>
       <AccentTheme />
       <div className="min-h-screen">
-        <aside className="fixed inset-y-3 left-3 z-30 hidden w-64 overflow-hidden rounded-[26px] border border-sidebar-border shadow-[0_24px_60px_-30px_rgb(4_2_10/0.6)] backdrop-blur-xl backdrop-saturate-150 print:hidden lg:block">
+        <aside className="fixed inset-y-3 left-3 z-30 hidden w-64 overflow-hidden rounded-[26px] border border-sidebar-border bg-sidebar bg-(image:--glass-sheen) shadow-(--glass-shadow) backdrop-blur-[28px] backdrop-saturate-[1.85] print:hidden lg:block">
           <SidebarBody />
         </aside>
         <div className="lg:pl-[17.5rem]">
           <div className="sticky top-0 z-20 print:hidden">
             <MembershipNotice />
-            <header className="mx-3 mt-3 flex h-14 items-center gap-3 rounded-[20px] border bg-background/55 px-3 shadow-[0_24px_60px_-30px_rgb(4_2_10/0.6)] inset-shadow-[0_1px_0_rgb(255_255_255/0.08)] backdrop-blur-xl backdrop-saturate-150 md:px-4 lg:ml-0">
+            <header className="mx-3 mt-3 flex h-14 items-center gap-3 rounded-[20px] border border-(--glass-edge) bg-card bg-(image:--glass-sheen) px-3 shadow-(--glass-shadow) backdrop-blur-[28px] backdrop-saturate-[1.85] md:px-4 lg:ml-0">
               <Sheet open={open} onOpenChange={setOpen}>
                 <SheetTrigger asChild>
                   <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Abrir menú">
                     <Menu />
                   </Button>
                 </SheetTrigger>
-                <SheetContent side="left" className="w-72 border-sidebar-border p-0" showCloseButton={false}>
+                <SheetContent side="left" className="w-72 border-sidebar-border bg-sidebar bg-(image:--glass-sheen) p-0" showCloseButton={false}>
                   <SheetTitle className="sr-only">Menú</SheetTitle>
                   <SidebarBody onNavigate={() => setOpen(false)} />
                 </SheetContent>
