@@ -439,6 +439,31 @@ await admin.db.rpc("admin_reactivate", { p_business: bizM.id });
 const m7 = await mem(ownerM.db);
 check("reactivar devuelve el acceso", m7?.state === "activa" && m7.suspendedReason === null && !(await sellM()).error && (await ownerM.db.from("products").select("id")).data?.length === 1, m7?.state);
 
+// Revisión: el negocio recién registrado espera al administrador; rechazar no borra nada y se puede aceptar después
+const { client: ownerR, error: signUpR } = await signUp(mail("dueno-r"), { name: "Dueño Rho", business_name: "Boutique Rho" });
+const bizR = (await ownerR.from("profiles").select("business_id").single()).data?.business_id;
+const editR = () => ownerR.rpc("update_business", { p_name: "Otro", p_order_prefix: "X-", p_quote_prefix: "Y-" });
+const r0 = await mem(ownerR);
+check("negocio nuevo nace en revisión", !signUpR && !!bizR && r0?.state === "revision", signUpR?.message ?? r0?.state);
+check("en revisión no lee sus tablas", (await ownerR.from("branches").select("id")).data?.length === 0);
+await expectError("en revisión no edita el negocio", editR(), /Cuenta en revisión/);
+const rowR = (await admin.db.rpc("admin_businesses")).data?.find((r) => r.id === bizR);
+check("el administrador ve la solicitud", rowR?.state === "revision" && rowR.owner_name === "Dueño Rho" && rowR.ends_at === null, JSON.stringify(rowR));
+const { error: rejErr } = await admin.db.rpc("admin_reject", { p_business: bizR, p_reason: "Datos incompletos" });
+const r1 = await mem(ownerR);
+check("rechazar bloquea con el motivo", !rejErr && r1?.state === "rechazada" && r1.suspendedReason === "Datos incompletos", rejErr?.message ?? r1?.state);
+await expectError("rechazada no edita el negocio", editR(), /Solicitud rechazada/);
+await service.from("businesses").update({ trial_ends_at: daysAgo(30) }).eq("id", bizR);
+const { error: okErr } = await admin.db.rpc("admin_approve", { p_business: bizR });
+const r2 = await mem(ownerR);
+const trialR = (new Date(r2?.trialEndsAt) - Date.now()) / 864e5;
+check("aceptar (aun rechazada) abre la prueba completa desde hoy", !okErr && r2?.state === "prueba" && r2.suspendedReason === null && trialR > 13.9 && trialR <= 14, okErr?.message ?? `${r2?.state} ${trialR}`);
+check("aceptado ya lee sus tablas", (await ownerR.from("branches").select("id")).data?.length === 1);
+await expectError("no se acepta dos veces", admin.db.rpc("admin_approve", { p_business: bizR }), /no está en revisión/);
+await expectError("no se rechaza un negocio aceptado", admin.db.rpc("admin_reject", { p_business: bizR, p_reason: "x" }), /no está en revisión/);
+const actionsR = (await admin.db.rpc("admin_events", { p_business: bizR })).data?.map((e) => e.action).reverse().join();
+check("el historial registra rechazar y aceptar", actionsR === "rechazar,aceptar", actionsR);
+
 // Permisos: solo el administrador toca las admin_*; anon no ejecuta nada nuevo
 const adminCalls = (db) => [
   ["admin_businesses", {}],
@@ -446,6 +471,8 @@ const adminCalls = (db) => [
   ["admin_mark_paid", { p_business: bizM.id, p_months: 1, p_amount: 0, p_note: null }],
   ["admin_suspend", { p_business: bizM.id, p_reason: "x" }],
   ["admin_reactivate", { p_business: bizM.id }],
+  ["admin_approve", { p_business: bizM.id }],
+  ["admin_reject", { p_business: bizM.id, p_reason: "x" }],
 ].map(([fn, args]) => [fn, db.rpc(fn, args)]);
 for (const [fn, call] of adminCalls(ownerM.db)) await expectError(`un dueño no ejecuta ${fn}`, call, /Solo administradores de la plataforma/);
 for (const [fn, call] of adminCalls(anon)) await expectError(`anon no ejecuta ${fn}`, call, /permission denied/);

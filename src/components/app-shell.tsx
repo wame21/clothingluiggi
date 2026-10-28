@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  Ban,
   BarChart3,
   Boxes,
   CreditCard,
@@ -383,6 +384,31 @@ function DataGate({ children }: { children: ReactNode }) {
           <Button variant="outline" onClick={() => void signOut()}>
             <LogOut /> Cerrar sesión
           </Button>
+        </div>
+      </FullScreen>
+    );
+  }
+
+  if (membership?.state === "revision" || membership?.state === "rechazada") {
+    const rejected = membership.state === "rechazada";
+    return (
+      <FullScreen>
+        {rejected ? <Ban className="size-8 text-destructive" /> : <Hourglass className="size-8 text-gold" />}
+        <h2 className="text-xl font-semibold">{rejected ? "Tu solicitud no fue aprobada" : "Tu cuenta está en revisión"}</h2>
+        <p className="text-sm text-muted-foreground">
+          {rejected
+            ? `Hola ${profile?.name}. No pudimos aprobar el registro de tu negocio.`
+            : `Hola ${profile?.name}. Recibimos la solicitud de tu negocio y la estamos revisando. Ten paciencia: en cuanto confirmemos tu cuenta podrás entrar al sistema.`}
+        </p>
+        {rejected && membership.suspendedReason && <p className="text-sm text-muted-foreground">Motivo: {membership.suspendedReason}</p>}
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button onClick={() => void init()}>
+            <RefreshCw /> Revisar de nuevo
+          </Button>
+          <Button variant="outline" onClick={() => void signOut()}>
+            <LogOut /> Cerrar sesión
+          </Button>
+          <AdminLink />
         </div>
       </FullScreen>
     );

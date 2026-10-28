@@ -38,9 +38,8 @@ describe("daysLeft", () => {
 });
 
 describe("isBlocked", () => {
-  it("bloquea vencida y suspendida", () => {
-    expect(isBlocked(membership({ state: "vencida" }))).toBe(true);
-    expect(isBlocked(membership({ state: "suspendida" }))).toBe(true);
+  it("bloquea vencida, suspendida y la solicitud en revisión o rechazada", () => {
+    for (const state of ["vencida", "suspendida", "revision", "rechazada"] as const) expect(isBlocked(membership({ state }))).toBe(true);
   });
 
   it("deja pasar prueba, activa, gracia y la membresía sin cargar", () => {

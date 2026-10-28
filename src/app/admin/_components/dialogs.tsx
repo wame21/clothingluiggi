@@ -39,7 +39,7 @@ export type PlatformSettings = {
   whatsapp: string;
 };
 
-export type Action = "pagar" | "suspender" | "historial";
+export type Action = "pagar" | "suspender" | "rechazar" | "historial";
 
 type Event = {
   id: string;
@@ -75,6 +75,8 @@ export function ActionDialog({
           <History {...props} />
         ) : action === "pagar" ? (
           <Pay {...props} settings={settings} />
+        ) : action === "rechazar" ? (
+          <Reject {...props} />
         ) : (
           <Suspend {...props} />
         )}
@@ -272,6 +274,26 @@ function Suspend({ biz, onClose, onDone }: Props) {
     >
       <Field label="Motivo (opcional, lo ve el negocio)">
         {(id) => <Input id={id} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Falta de pago, prueba…" />}
+      </Field>
+    </Shell>
+  );
+}
+
+function Reject({ biz, onClose, onDone }: Props) {
+  const [reason, setReason] = useState("");
+  return (
+    <Shell
+      title="Rechazar solicitud"
+      description={`${biz.name} no podrá entrar al sistema. No se borra nada: puedes aceptarlo después.`}
+      label="Rechazar"
+      destructive
+      run={() => supabase().rpc("admin_reject", { p_business: biz.id, p_reason: reason.trim() })}
+      ok="Solicitud rechazada"
+      onClose={onClose}
+      onDone={onDone}
+    >
+      <Field label="Motivo (opcional, lo ve el negocio)">
+        {(id) => <Input id={id} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Datos incompletos, negocio duplicado…" />}
       </Field>
     </Shell>
   );
