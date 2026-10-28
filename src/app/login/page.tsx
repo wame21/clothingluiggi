@@ -56,6 +56,15 @@ export default function LoginPage() {
   const codeReady = code.length === CODE_LENGTH;
   const found = lookup?.code === code ? lookup : null;
 
+  // Sin servidor que redirija: quien ya tiene sesión pasa directo a la bienvenida.
+  useEffect(() => {
+    void supabase()
+      .auth.getSession()
+      .then(({ data }) => {
+        if (data.session) router.replace("/");
+      });
+  }, [router]);
+
   // Al completar el código se consulta el negocio (con una pausa para no consultar en cada tecla).
   useEffect(() => {
     if (mode !== "unirme" || !codeReady) return;

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist_Mono, Manrope, Syne } from "next/font/google";
 import { ThemeProvider } from "next-themes";
-import { AppShell } from "@/components/app-shell";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { APP_NAME } from "@/lib/constants";
@@ -38,7 +37,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} disableTransitionOnChange>
           <TooltipProvider delayDuration={200}>
-            <AppShell>{children}</AppShell>
+            {children}
             <Toaster richColors position="top-right" />
           </TooltipProvider>
         </ThemeProvider>
