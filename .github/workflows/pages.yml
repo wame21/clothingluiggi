@@ -1,5 +1,5 @@
 # Publica el login y la bienvenida (sitio estático) en GitHub Pages con cada push a la rama pages.
-# La URL y la llave publicable de Supabase son variables del repo (Settings → Variables); no son secretos.
+# Sin base de datos: la cuenta de prueba está en src/lib/demo-auth.ts.
 name: GitHub Pages
 
 on:
@@ -30,8 +30,6 @@ jobs:
       - run: pnpm build
         env:
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
-          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: out

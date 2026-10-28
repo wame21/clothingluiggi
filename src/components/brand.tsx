@@ -1,6 +1,6 @@
 "use client";
 
-import { useErp, useBusinessName } from "@/lib/store";
+import { APP_NAME } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 /** Iniciales del nombre del negocio (máx. 2 letras). */
@@ -13,10 +13,8 @@ const initialsOf = (name: string) =>
     .join("")
     .toUpperCase();
 
-/** Logo del negocio o, sin logo, sus iniciales sobre el aro del color de acento. */
+/** Iniciales de la app sobre el aro del color de acento (la demo no tiene negocio ni logo). */
 export function BrandMark({ className }: { className?: string }) {
-  const name = useBusinessName();
-  const logoUrl = useErp((s) => s.profileSettings.logoUrl);
   return (
     <div
       className={cn(
@@ -25,21 +23,16 @@ export function BrandMark({ className }: { className?: string }) {
       )}
     >
       <div className="grid size-full place-items-center overflow-hidden rounded-full bg-white dark:bg-[oklch(0.12_0.005_75)]">
-        {logoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={logoUrl} alt={name} className="size-full object-cover" />
-        ) : (
-          <span className="font-display text-[0.95em] font-semibold leading-none tracking-tight text-[#1b1620] dark:text-[oklch(0.95_0.01_85)]">
-            {initialsOf(name)}
-          </span>
-        )}
+        <span className="font-display text-[0.95em] font-semibold leading-none tracking-tight text-[#1b1620] dark:text-[oklch(0.95_0.01_85)]">
+          {initialsOf(APP_NAME)}
+        </span>
       </div>
     </div>
   );
 }
 
 export function BrandLockup() {
-  const name = useBusinessName();
+  const name = APP_NAME;
   return (
     <div className="flex items-center gap-3">
       <BrandMark />
