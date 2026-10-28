@@ -231,7 +231,8 @@ export interface ErpData {
   expenses: Expense[];
 }
 
-export type MembershipState = "prueba" | "activa" | "gracia" | "vencida" | "suspendida";
+/** `revision` y `rechazada`: negocio recién registrado que el administrador de la plataforma aún no acepta. */
+export type MembershipState = "revision" | "rechazada" | "prueba" | "activa" | "gracia" | "vencida" | "suspendida";
 
 /** Datos para pagar la membresía; los edita el administrador de la plataforma. */
 export interface PaymentDetails {

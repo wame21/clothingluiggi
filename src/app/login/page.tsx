@@ -45,7 +45,8 @@ type Lookup = { code: string; name: string | null };
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("entrar");
-  const [form, setForm] = useState({ name: "", email: "", password: "", businessName: "", inviteCode: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", confirm: "", businessName: "", inviteCode: "" });
+  const [confirmFocused, setConfirmFocused] = useState(false);
   const [lookup, setLookup] = useState<Lookup | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -114,6 +115,7 @@ export default function LoginPage() {
 
   const registro = mode !== "entrar";
   const codeInvalid = mode === "unirme" && found?.name === null;
+  const confirmMismatch = registro && form.confirm !== form.password;
 
   return (
     <div className="grid min-h-screen place-items-center px-4 py-10">
@@ -139,7 +141,7 @@ export default function LoginPage() {
               <CardTitle className="font-display text-2xl font-bold">{mode === "entrar" ? "Inicia sesión" : "Crea tu cuenta"}</CardTitle>
               <CardDescription>
                 {mode === "entrar" && "Entra con el correo que registraste."}
-                {mode === "crear" && "Serás el dueño del negocio y podrás configurar sucursales, catálogo y equipo."}
+                {mode === "crear" && "Serás el dueño del negocio y podrás configurar sucursales, catálogo y equipo. Revisaremos tu solicitud antes de activar la cuenta."}
                 {mode === "unirme" && "Pide el código de invitación al dueño. Él debe aprobar tu cuenta antes de que puedas ver el sistema."}
               </CardDescription>
             </CardHeader>
@@ -194,6 +196,27 @@ export default function LoginPage() {
                     onChange={set("password")}
                   />
                 </div>
+                {registro && (
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="confirm">Confirmar contraseña</Label>
+                    <Input
+                      id="confirm"
+                      type="password"
+                      required
+                      autoComplete="new-password"
+                      value={form.confirm}
+                      onChange={set("confirm")}
+                      onFocus={() => setConfirmFocused(true)}
+                      onBlur={() => setConfirmFocused(false)}
+                      aria-invalid={form.confirm !== "" && confirmMismatch}
+                      aria-describedby="confirm-status"
+                    />
+                    {/* Se mantiene visible al salir del campo si ya escribió algo, para que se vea por qué el botón está desactivado. */}
+                    <p id="confirm-status" aria-live="polite" className={confirmMismatch ? "text-sm text-destructive" : "text-sm text-success"}>
+                      {(confirmFocused || form.confirm !== "") && (confirmMismatch ? "Las contraseñas no coinciden" : "Las contraseñas coinciden")}
+                    </p>
+                  </div>
+                )}
                 {mode === "unirme" && (
                   <div className="grid gap-1.5">
                     <Label htmlFor="inviteCode">Código de invitación</Label>
@@ -222,7 +245,7 @@ export default function LoginPage() {
                     {error}
                   </p>
                 )}
-                <Button type="submit" disabled={busy || codeInvalid} className="mt-1">
+                <Button type="submit" disabled={busy || codeInvalid || confirmMismatch} className="mt-1">
                   {busy && <Loader2 className="animate-spin" />}
                   {mode === "entrar" ? "Entrar" : mode === "crear" ? "Crear mi negocio" : "Unirme al negocio"}
                 </Button>

@@ -45,6 +45,12 @@ export async function user(email, data) {
   const { error: signInErr } = await client.auth.signInWithPassword({ email, password: PASSWORD });
   if (signInErr) throw signInErr;
   const { data: me } = await client.auth.getUser();
+  // Los negocios nacen en revisión: las pruebas los aceptan como lo haría el administrador de la plataforma.
+  if (data.business_name) {
+    const { data: profile } = await service.from("profiles").select("business_id").eq("id", me.user.id).single();
+    const { error: approveErr } = await service.from("businesses").update({ approved_at: new Date().toISOString() }).eq("id", profile.business_id);
+    if (approveErr) throw approveErr;
+  }
   return { db: client, id: me.user.id, email };
 }
 

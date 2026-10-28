@@ -52,9 +52,47 @@ await step("registro de un negocio nuevo", async () => {
   await page.getByLabel("Tu nombre").fill("Dueña de Prueba");
   await page.getByLabel("Nombre del negocio").fill(BUSINESS);
   await page.getByLabel("Correo").fill(EMAIL);
-  await page.getByLabel("Contraseña").fill(PASSWORD);
+  await page.getByLabel("Contraseña", { exact: true }).fill(PASSWORD);
+  await page.getByLabel("Confirmar contraseña").fill("otra");
+  await page.getByText("Las contraseñas no coinciden").waitFor({ timeout: 5000 });
+  if (await page.getByRole("button", { name: "Crear mi negocio" }).isEnabled()) throw new Error("se puede enviar con contraseñas distintas");
+  await page.getByLabel("Confirmar contraseña").fill(PASSWORD);
+  await page.getByText("Las contraseñas coinciden").waitFor({ timeout: 5000 });
   await shot("registro");
   await page.getByRole("button", { name: "Crear mi negocio" }).click();
+  await page.getByText("Tu cuenta está en revisión").waitFor({ timeout: 20000 });
+  await shot("registro-en-revision");
+});
+
+// Membresía: las fechas se mueven con la llave de servicio; aceptar, pagos y suspensión, con el administrador de la plataforma
+const { platformAdmin, service } = await import("./db-helpers.mjs");
+const admin = await platformAdmin(`admin${stamp}@example.test`);
+let ctx3;
+let page3;
+const adminRow = () => page3.getByRole("row").filter({ hasText: BUSINESS });
+const adminMenu = async (item) => {
+  await adminRow().getByRole("button", { name: `Acciones de ${BUSINESS}` }).click();
+  await page3.getByRole("menuitem", { name: item }).click();
+};
+
+await step("admin: acepta la solicitud desde /admin y el dueño entra", async () => {
+  ctx3 = await newContext();
+  page3 = await ctx3.newPage();
+  watch(page3);
+  active = page3;
+  await page3.goto(BASE + "/login", { waitUntil: "networkidle" });
+  await page3.getByLabel("Correo").fill(admin.email);
+  await page3.getByLabel("Contraseña").fill(PASSWORD);
+  await page3.getByRole("button", { name: "Entrar", exact: true }).click();
+  await page3.waitForURL((u) => u.pathname === "/", { timeout: 20000 });
+  await page3.goto(BASE + "/admin", { waitUntil: "networkidle" });
+  await page3.getByPlaceholder("Buscar por negocio o correo").fill(BUSINESS);
+  await adminRow().getByText("En revisión").waitFor({ timeout: 15000 });
+  await page3.screenshot({ path: `${OUT}admin-solicitud.png` });
+  await adminRow().getByRole("button", { name: "Aceptar" }).click();
+  await page3.getByText("Negocio aceptado").waitFor({ timeout: 15000 });
+  active = page;
+  await page.getByRole("button", { name: "Revisar de nuevo" }).click();
   await page.getByText("así va tu negocio").waitFor({ timeout: 20000 });
   await shot("dashboard-nuevo", true);
 });
@@ -303,7 +341,8 @@ await step("registro con código de invitación: queda pendiente", async () => {
   await page2.getByRole("tab", { name: "Unirme a un negocio" }).click();
   await page2.getByLabel("Tu nombre").fill(MEMBER);
   await page2.getByLabel("Correo").fill(MEMBER_EMAIL);
-  await page2.getByLabel("Contraseña").fill(PASSWORD);
+  await page2.getByLabel("Contraseña", { exact: true }).fill(PASSWORD);
+  await page2.getByLabel("Confirmar contraseña").fill(PASSWORD);
   await page2.getByLabel("Código de invitación").fill(inviteCode);
   await page2.getByText(`Te unirás a ${BUSINESS}`).waitFor({ timeout: 15000 });
   await page2.getByRole("button", { name: "Unirme al negocio" }).click();
@@ -337,10 +376,8 @@ await step("el usuario aprobado ya entra a la app", async () => {
 await ctx2?.close();
 
 // ---------------------------------------------------------------------------
-// Membresía: las fechas se mueven con la llave de servicio; pagos y suspensión, con el administrador de la plataforma
+// Membresía: las fechas se mueven con la llave de servicio
 // ---------------------------------------------------------------------------
-const { platformAdmin, service } = await import("./db-helpers.mjs");
-const admin = await platformAdmin(`admin${stamp}@example.test`);
 const { data: biz } = await service.from("businesses").select("id").eq("name", BUSINESS).single();
 const paidDaysAgo = (d) => service.from("businesses").update({ paid_until: new Date(Date.now() - d * 864e5).toISOString() }).eq("id", biz.id);
 
@@ -362,25 +399,9 @@ await step("membresía: pasada la gracia solo se ve la pantalla de pago", async 
   await shot("membresia-vencida");
 });
 
-let ctx3;
-let page3;
-const adminRow = () => page3.getByRole("row").filter({ hasText: BUSINESS });
-const adminMenu = async (item) => {
-  await adminRow().getByRole("button", { name: `Acciones de ${BUSINESS}` }).click();
-  await page3.getByRole("menuitem", { name: item }).click();
-};
-
 await step("admin: ve el negocio y lo suspende desde /admin", async () => {
-  ctx3 = await newContext();
-  page3 = await ctx3.newPage();
-  watch(page3);
   active = page3;
-  await page3.goto(BASE + "/login", { waitUntil: "networkidle" });
-  await page3.getByLabel("Correo").fill(admin.email);
-  await page3.getByLabel("Contraseña").fill(PASSWORD);
-  await page3.getByRole("button", { name: "Entrar", exact: true }).click();
-  await page3.waitForURL((u) => u.pathname === "/", { timeout: 20000 });
-  await page3.goto(BASE + "/admin", { waitUntil: "networkidle" });
+  await page3.reload({ waitUntil: "networkidle" });
   await page3.getByPlaceholder("Buscar por negocio o correo").fill(BUSINESS);
   await adminRow().first().waitFor({ timeout: 15000 });
   await adminRow().getByRole("button", { name: "Suspender" }).click();

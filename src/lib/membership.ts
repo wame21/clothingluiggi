@@ -2,6 +2,8 @@ import { fLongDate, mxn } from "./format";
 import type { Membership, MembershipState } from "./types";
 
 export const STATE_LABELS: Record<MembershipState, string> = {
+  revision: "En revisión",
+  rechazada: "Rechazada",
   prueba: "Prueba",
   activa: "Activa",
   gracia: "En gracia",
@@ -15,8 +17,8 @@ export function daysLeft(iso: string | null, now = new Date()): number | null {
   return Math.ceil((new Date(iso).getTime() - now.getTime()) / 86_400_000) || 0;
 }
 
-/** Vencida o suspendida: la base niega todo y la app solo muestra la pantalla de pago. */
-export const isBlocked = (m: Membership | null) => m?.state === "vencida" || m?.state === "suspendida";
+/** Fuera de prueba, activa o gracia (igual que is_member() en la base): la base niega todo y la app solo muestra la pantalla de espera o de pago. */
+export const isBlocked = (m: Membership | null) => !!m && !["prueba", "activa", "gracia"].includes(m.state);
 
 /** Lo que toca pagar: el primer pago (sin mensualidades registradas) incluye el alta. */
 export const amountDue = (m: Membership) => m.priceMonthly + (m.paidUntil ? 0 : m.priceSetup);

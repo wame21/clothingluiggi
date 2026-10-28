@@ -1,6 +1,6 @@
 "use client";
 
-import { Ban, Landmark, LogOut, MoreHorizontal, RotateCcw, Search, Store } from "lucide-react";
+import { Ban, Check, Landmark, LogOut, MoreHorizontal, RotateCcw, Search, Store, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -23,6 +23,8 @@ import { ActionDialog, SettingsDialog, type Action, type AdminBusiness, type Pla
 const STATES = Object.keys(STATE_LABELS) as MembershipState[];
 
 const BADGE: Record<MembershipState, "default" | "secondary" | "outline" | "destructive"> = {
+  revision: "outline",
+  rechazada: "destructive",
   activa: "default",
   prueba: "secondary",
   gracia: "outline",
@@ -80,10 +82,10 @@ export default function AdminPage() {
     );
   }, [rows, q, filter]);
 
-  const reactivate = async (b: AdminBusiness) => {
-    const { error } = await supabase().rpc("admin_reactivate", { p_business: b.id });
+  const quick = async (fn: "admin_reactivate" | "admin_approve", b: AdminBusiness, ok: string) => {
+    const { error } = await supabase().rpc(fn, { p_business: b.id });
     if (error) return void toast.error(error.message);
-    toast.success("Negocio reactivado");
+    toast.success(ok);
     await load();
   };
 
@@ -96,7 +98,7 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen">
-      <header className="m-3 flex items-center justify-between gap-3 rounded-[20px] border border-sidebar-border bg-sidebar px-4 py-3 text-sidebar-foreground shadow-[0_24px_60px_-30px_rgb(4_2_10/0.6)] backdrop-blur-xl backdrop-saturate-150">
+      <header className="m-3 flex items-center justify-between gap-3 rounded-[20px] border border-sidebar-border bg-sidebar bg-(image:--glass-sheen) px-4 py-3 text-sidebar-foreground shadow-(--glass-shadow) backdrop-blur-[28px] backdrop-saturate-[1.85]">
         <BrandLockup />
         <div className="flex shrink-0 items-center gap-2">
           <Button asChild variant="outline" size="sm" className="text-foreground" aria-label="Ir a mi negocio">
@@ -173,7 +175,9 @@ export default function AdminPage() {
               </TableHeader>
               <TableBody>
                 {shown.map((b) => {
-                  const due = b.paid_until ?? b.trial_ends_at;
+                  // Solicitud de alta: la prueba aún no corre, empieza al aceptarla.
+                  const request = b.state === "revision" || b.state === "rechazada";
+                  const due = request ? null : (b.paid_until ?? b.trial_ends_at);
                   return (
                     <TableRow key={b.id}>
                       <TableCell className="pl-4 font-medium">{b.name}</TableCell>
@@ -192,8 +196,19 @@ export default function AdminPage() {
                       <TableCell className="whitespace-nowrap">{fDate(b.created_at)}</TableCell>
                       <TableCell className="sticky right-0 bg-background">
                         <div className="flex items-center justify-end gap-1">
-                          {b.state === "suspendida" ? (
-                            <Button variant="outline" size="sm" onClick={() => void reactivate(b)}>
+                          {request ? (
+                            <>
+                              <Button variant="outline" size="sm" onClick={() => void quick("admin_approve", b, "Negocio aceptado")}>
+                                <Check /> Aceptar
+                              </Button>
+                              {b.state === "revision" && (
+                                <Button variant="outline" size="sm" className="text-destructive" onClick={() => setTarget({ biz: b, action: "rechazar" })}>
+                                  <X /> Rechazar
+                                </Button>
+                              )}
+                            </>
+                          ) : b.state === "suspendida" ? (
+                            <Button variant="outline" size="sm" onClick={() => void quick("admin_reactivate", b, "Negocio reactivado")}>
                               <RotateCcw /> Reactivar
                             </Button>
                           ) : (
